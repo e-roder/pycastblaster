@@ -130,3 +130,6 @@ dmypy.json
 
 # NOCHECKIN
 *nocheckin*.*
+
+# Cache files
+image_cache.txt
