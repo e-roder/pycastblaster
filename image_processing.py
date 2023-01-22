@@ -1,4 +1,4 @@
-from PIL import Image
+from PIL import Image, ImageOps
 from pillow_heif import register_heif_opener
 from pillow_heif import register_avif_opener
 import os.path
@@ -32,7 +32,11 @@ def crop_image_preserve_height(image, target_aspect_ratio):
 
 def crop_image(image_file_name):
     with Image.open(image_file_name, "r") as image:
-        #image_write= image_write.crop((0,0,image_write.width * 0.5, image_write.height * 0.5))
+        # Images (jpegs only?) may be rotated with EXIF metadata, while the raw image is unrotated
+        # Pillow doesn't apply this rotation automatically so we do so manually if it exists. The
+        # resulting image has the rotation baked in and the EXIF metadata removed.
+        image= ImageOps.exif_transpose(image)
+
         print("opened image '%s'" % image_file_name)
 
         if image.width >= image.height: # landscape
