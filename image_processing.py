@@ -75,6 +75,23 @@ def get_images_from_local_path(local_image_path):
                     if filename.lower().endswith(supported_image_extensions)]
     return images
 
+def image_is_portait(image_file_name):
+    with Image.open(image_file_name, "r") as image:
+        return image.width < image.height
+    return False
+
+# Splice two portait images side-by-side, assuming they are the same width and height
+def splice_images(image_file_name_1, image_file_name_2, spliced_image_file_name):
+    with Image.open(image_file_name_1) as image_1:
+        with Image.open(image_file_name_2) as image_2:
+            # Pasting doesn't automatically resize an image so we have to crop it first
+            # (resize() doesn't do what we want because it stretches the original image to fit)
+            image_1= image_1.crop((0, 0, image_1.width * 2, image_1.height))
+            # Make sure to use image_2.width since image_1 has been resized.
+            # paste() operates in-place, unlike most PIL functions so no need to assign to image_1
+            image_1.paste(image_2, (image_2.width, 0))
+            image_1.save(spliced_image_file_name)
+
 def process_images():
     images= get_images_from_local_path(image_processing_directory)
     image_count= len(images)

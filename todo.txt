@@ -1,7 +1,10 @@
 TODO:
 -image processing
 --dynamically compose portait images into temp image
--currate images
+--crop on the fly?
+--blurry background for landscape instead of cropping?
+---purge lingering temp files on startup
+-curate images
 -move processed images into real folder
 -Support for multiple chromecasts?
 --Is this always-on or does it rely on Home Assistant to call it?
