@@ -1,6 +1,7 @@
 TODO:
 -image processing
 --blurry background instead of cropping? landscape only?
+--black dividing line between spliced images?
 -improve lazy evaluation of is_portait to better handle worst-case scenarios
 --treat unknown-layout images like landscape
 --don't do lazy evaluation when looking for next portrait image to splice with, just treat like landscape
@@ -12,6 +13,7 @@ TODO:
 --Is this always-on or does it rely on Home Assistant to call it?
 -make usable on other machines
 --move config constants to a separate file?
+---user config for portrait and landscape processing modes?
 --rename test.py
 --figure out how to make image processing callable from command line
 --generate python requirements
@@ -22,6 +24,7 @@ TODO:
 --reload settings (e.g. slideshow length) on the fly
 -clean up
 --Remove support for external hosting? Or unify this code better? Still support splicing? Probably remove for simplicity.
+--import from -> import
 -Move to home assistant server
 -try queueing to avoid black screen between images
 --maybe just queuing one image and advancing is sufficient? rely on chromecast device to purge queue?
