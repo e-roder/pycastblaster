@@ -1,19 +1,27 @@
 TODO:
 -image processing
---dynamically compose portait images into temp image
---crop on the fly?
---blurry background for landscape instead of cropping?
----purge lingering temp files on startup
+--blurry background instead of cropping? landscape only?
+-improve lazy evaluation of is_portait to better handle worst-case scenarios
+--treat unknown-layout images like landscape
+--don't do lazy evaluation when looking for next portrait image to splice with, just treat like landscape
+--pre-evaluate the first 10(?) images so that
+--evaluate while waiting for next image instead of sleeping?
+-purge lingering temp files on startup (record names explicitly in delete_me.txt to mitigate risk of deleting files accidentally?)
 -curate images
--move processed images into real folder
 -Support for multiple chromecasts?
 --Is this always-on or does it rely on Home Assistant to call it?
--move config constants to a separate file?
 -make usable on other machines
+--move config constants to a separate file?
 --rename test.py
 --figure out how to make image processing callable from command line
 --generate python requirements
 --disclaimer about Linux only due to pychromecast networking using poll()
+-refresh image list in background thread, swap between iterations?
+-UI/UX: via webserver?
+--graceful exit
+--reload settings (e.g. slideshow length) on the fly
+-clean up
+--Remove support for external hosting? Or unify this code better? Still support splicing? Probably remove for simplicity.
 -Move to home assistant server
 -try queueing to avoid black screen between images
 --maybe just queuing one image and advancing is sufficient? rely on chromecast device to purge queue?

@@ -9,6 +9,7 @@ import threading
 import socket
 import image_processing
 import uuid
+from enum import IntEnum
 
 ##### config constants - TODO: don't hardcode?
 #If images are hosted on an external server. Else, images are hosted locally
@@ -27,6 +28,11 @@ content_type_dictionary= {
     ".jpg" :  "image/jpeg",
     ".jpeg" : "image/jpeg",
     ".png" : "image.png" }
+
+class ImageLayout(IntEnum):
+    Unknown= 0
+    Landscape= 1
+    Portrait= 2
 
 # Build the URL path:
 # 1. include the root server URL
@@ -83,7 +89,7 @@ def main():
         # images together into a temporary image to serve
         # -Skip images that are in local_spliced_image_path (maybe left-over from a previous run)        
         images= [
-            (local_image_file_path_to_url(image_path), image_processing.image_is_portait(image_path))
+            (local_image_file_path_to_url(image_path), ImageLayout.Unknown)
             for image_path in image_processing.get_images_from_local_path(local_images_path)
                 if not image_path.startswith(local_spliced_image_path)]
         # Spin up a separate thread to run a web server. The server exposes images in local_images_path to the Chromecast
@@ -121,28 +127,53 @@ def main():
     # when we encounter it so we set this bool to ignore it.
     skip_next_portrait= False
     image_count= len(images)
-    last_spliced_image_file_names= []
+    temp_image_file_names= []
 
     while(not exit):
         for image_index, image in enumerate(images):
             if splice_images:
-                if not image[1]:
-                    pass # landscape, handle as normal
+                # Lazily evaluate IsPortrait rather than on startup because it's slow (need to open image file and
+                # potentially transpose it)
+                if image[1] == ImageLayout.Unknown:
+                    local_image_path= url_to_local_image_file_path(image[0])
+                    image= (
+                        image[0],
+                        ImageLayout.Portrait if image_processing.image_is_portait(local_image_path) else ImageLayout.Landscape)
+                    images[image_index]= image # Update list of images so we don't need to evaluate this image again
+
+                if image[1] == ImageLayout.Landscape:
+                    # Process image on the fly, generate a temporary file to store the processed image
+                    temp_image_file_name= local_spliced_image_path + str(uuid.uuid4()) + ".jpg"
+                    local_image= url_to_local_image_file_path(image[0])
+                    # Update temp_image_file_name in case process_image renamed it
+                    temp_image_file_name= image_processing.process_image_file(local_image, temp_image_file_name)
+                    temp_image_file_names.append(temp_image_file_name)
+                    image= (local_image_file_path_to_url(temp_image_file_name), False)
                 elif skip_next_portrait:
                     # If this image is a portait, clear skip_next_portait and skip it
                     skip_next_portrait= False
                     continue
-                else:
+                else: # ImageLayout.Portrait
                     # Find the next portait image in images to splice with
                     # If there is one then set skip_next_portait, splice it with this one, and replace image
                     for search_image_index in range(image_index + 1, image_count):
                         search_image= images[search_image_index]
-                        if search_image[1]:
+
+                        # Lazily evaluate IsPortrait rather than on startup because it's slow (need to open image file and
+                        # potentially transpose it)
+                        if search_image[1] == ImageLayout.Unknown:
+                            local_search_image_path= url_to_local_image_file_path(search_image[0])
+                            search_image= (
+                                search_image[0],
+                                ImageLayout.Portrait if image_processing.image_is_portait(local_search_image_path) else ImageLayout.Landscape)
+                            images[search_image_index]= search_image # Update list of images so we don't need to evaluate this image again
+
+                        if search_image[1] == ImageLayout.Portrait:
                             skip_next_portrait= True
                             # Select a temporary file name for the spliced image (generate a unique ID since chromecast caches images
                             # if we reuse file names)
                             spliced_image_file_name= local_spliced_image_path + str(uuid.uuid4()) + ".jpg"
-                            last_spliced_image_file_names.append(spliced_image_file_name)
+                            temp_image_file_names.append(spliced_image_file_name)
                             local_image_1= url_to_local_image_file_path(image[0])
                             local_image_2= url_to_local_image_file_path(search_image[0])
                             print("Splicing '%s' + '%s' into '%s'" % (local_image_1, local_image_2, spliced_image_file_name))
@@ -157,8 +188,8 @@ def main():
                 image= image[0]
 
             # clean up temporary spliced images, leave a few around in-case they're still being served
-            if len(last_spliced_image_file_names) > 2:
-                to_delete= last_spliced_image_file_names.pop(0)
+            if len(temp_image_file_names) > 2:
+                to_delete= temp_image_file_names.pop(0)
                 if os.path.exists(to_delete):
                     print("Purging temporary image '%s'" % to_delete)
                     os.remove(to_delete)
