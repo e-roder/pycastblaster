@@ -1,6 +1,5 @@
-from PIL import Image, ImageOps, ImageFilter
-from pillow_heif import register_heif_opener
-from pillow_heif import register_avif_opener
+import PIL.Image, PIL.ImageOps, PIL.ImageFilter
+import pillow_heif
 import os.path
 import enum
 
@@ -18,8 +17,8 @@ landscape_processing_mode= ImageProcessing.Blur
 portrait_processing_mode= ImageProcessing.Crop
 
 # Support for HEIC image format since that is sometimes produced by iOS
-register_avif_opener()
-register_heif_opener()
+pillow_heif.register_avif_opener()
+pillow_heif.register_heif_opener()
 
 def crop_image_preserve_width(image, target_aspect_ratio):
 	target_height= image.width / target_aspect_ratio
@@ -43,7 +42,7 @@ def process_image(image):
 	# Images (jpegs only?) may be rotated with EXIF metadata, while the raw image is unrotated
 	# Pillow doesn't apply this rotation automatically so we do so manually if it exists. The
 	# resulting image has the rotation baked in and the EXIF metadata removed.
-	image_result= ImageOps.exif_transpose(image)
+	image_result= PIL.ImageOps.exif_transpose(image)
 
 	if image_result.width >= image_result.height: # landscape
 		print("cropping landscape")
@@ -74,7 +73,7 @@ def process_image(image):
 			blurred_copy= blurred_copy.resize((int(image_result.height * target_aspect_ratio), image_result.height))
 
 		# blur copy
-		blurred_copy= blurred_copy.filter(filter= ImageFilter.BoxBlur(16))
+		blurred_copy= blurred_copy.filter(filter= PIL.ImageFilter.BoxBlur(16))
 		# paste original centered in copy
 		delta_width= blurred_copy.width - image_result.width
 		delta_height= blurred_copy.height - image_result.height
@@ -91,7 +90,7 @@ def process_image(image):
 # output_image_file_name isn't a supported image type then the image is saved as a jpeg instead.
 # Returns: output_image_file_name, including modified extension if necessary.
 def process_image_file(input_image_file_name, output_image_file_name):
-	with Image.open(input_image_file_name, "r") as image:
+	with PIL.Image.open(input_image_file_name, "r") as image:
 		print("opened image '%s'" % input_image_file_name)
 		image= process_image(image)
 
@@ -113,18 +112,18 @@ def get_images_from_local_path(local_image_path):
 	return images
 
 def image_is_portait(image_file_name):
-	with Image.open(image_file_name, "r") as image:
+	with PIL.Image.open(image_file_name, "r") as image:
 		# Images (jpegs only?) may be rotated with EXIF metadata, while the raw image is unrotated
 		# Pillow doesn't apply this rotation automatically so we do so manually if it exists. The
 		# resulting image has the rotation baked in and the EXIF metadata removed.
-		image= ImageOps.exif_transpose(image)
+		image= PIL.ImageOps.exif_transpose(image)
 		return image.width < image.height
 	return False
 
 # Splice two portait images side-by-side, assuming they are the same width and height
 def splice_images(image_file_name_1, image_file_name_2, spliced_image_file_name):
-	with Image.open(image_file_name_1) as image_1:
-		with Image.open(image_file_name_2) as image_2:
+	with PIL.Image.open(image_file_name_1) as image_1:
+		with PIL.Image.open(image_file_name_2) as image_2:
 			image_1= process_image(image_1)
 			image_2= process_image(image_2)
 

@@ -1,7 +1,4 @@
 TODO:
--clean up
---Remove support for external hosting? Or unify this code better? Still support splicing? Probably remove for simplicity.
---import from -> import
 -purge lingering temp files on startup (record names explicitly in delete_me.txt to mitigate risk of deleting files accidentally?)
 -curate images
 -Support for multiple chromecasts?
