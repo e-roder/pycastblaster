@@ -1,6 +1,5 @@
 import time
 import pychromecast
-import web_crawler
 import random
 import os
 import http.server
