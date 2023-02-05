@@ -108,7 +108,7 @@ def get_images_from_local_path(local_image_path):
 			images= images + [
 				os.path.join(dirpath, filename)
 				for filename in filenames
-					if filename.lower().endswith(supported_image_extensions)]
+					if filename.lower().endswith(supported_image_extensions) and not filename.startswith("._")]
 	return images
 
 def image_is_portait(image_file_name):
