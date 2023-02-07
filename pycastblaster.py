@@ -15,9 +15,12 @@ local_images_path= "images/"
 local_temp_image_path= local_images_path + "temp/" # must be child of local_images_path in order to serve to Chromecast
 local_temp_image_list_file_path= local_temp_image_path + "pycastblaster_temp_files.txt"
 http_server_port= 8000
-server_url= "http://" + socket.gethostbyname(socket.gethostname()) + ":" + str(http_server_port)
+# Resize generated images down to this scale, so that they can be loaded faster by chromecast.
+# Adjust to max support resolution of your chromecast.
+image_processing.max_image_height_pixels= 720
 chromecast_friendly_names= ["Family Room TV", "Basement Lights TV"]
 slideshow_duration_seconds= 30
+server_url= "http://" + socket.gethostbyname(socket.gethostname()) + ":" + str(http_server_port)
 
 # file extension to MIME type
 content_type_dictionary= {
@@ -204,3 +207,24 @@ def main():
     pychromecast.discovery.stop_discovery(browser)
 
 main()
+
+# Multi Chromecast (Multi Threaded) Architecture
+# image server function: locks, yields and image, manages list of images, manages temp image files
+# -do we need to track distinct lists of temp images for each active thread,
+#  so that we don't purge temp images too soon if there are many chromecasts?
+# --if so, we need a way to purge temporary images when a chromecast thread stops
+#   (or just the next time the function is called)
+
+# chromecast thread: started for every active chromecast
+# -requests image from image server function and plays it on the chromecast
+
+# chromecast management thread:
+# -looks for chromecasts that don't have an active thread (and aren't in use) and starts one
+# -shuts down chromecast threads when the chromecast disconnects or something else takes control
+
+# image scanner thread: (optional?) periodically scans image directory in the background and refreshes image list
+# -alternative is that image server function blocks to rescan/regenerate image list periodically
+# -only refreshes (via swap) image server list when the image server function reaches the end
+# --must also lock the image server thread
+# -double-buffered? one list of images ready to swap and the other list being scanned
+# -configurable scan frequency (no need to always be scanning)
