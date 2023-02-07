@@ -6,6 +6,9 @@ import enum
 #test_image_file_name= "images/image_test/001.heic"
 image_processing_directory= "nas_mount/"
 aspect_ratio_720p= 1280 / 720 # 720p resolution
+# Resize generated images down to this scale, so that they can be loaded faster by chromecast.
+# Adjust to max support resolution of your chromecast.
+max_image_height_pixels= 720
 supported_image_extensions= (".jpg", ".jpeg", ".png")
 
 # How to handle images that aren't 720 aspect ratio
@@ -47,11 +50,13 @@ def process_image(image):
 	if image_result.width >= image_result.height: # landscape
 		print("cropping landscape")
 		target_aspect_ratio= aspect_ratio_720p
+		max_image_width_pixels= int(max_image_height_pixels * aspect_ratio_720p)
 		processing_mode= landscape_processing_mode		
 	else: #portait
 		print("cropping portrait")
 		# We will try to fit two portrait images at a time so crop to half-screen
 		target_aspect_ratio= aspect_ratio_720p / 2
+		max_image_width_pixels= int(max_image_height_pixels * aspect_ratio_720p / 2)
 		processing_mode= portrait_processing_mode
 
 	image_aspect_ratio= image_result.width / image_result.height
@@ -83,6 +88,9 @@ def process_image(image):
 	## Convert jpeg's to RGB only (they don't support alpha channels or palette mode)
 	#if new_extension.lower() in (".jpeg", ".jpg") and image_result.mode in ("RGBA", "P"):
 	image_result= image_result.convert("RGB")
+
+	if max_image_height_pixels > 0:
+		image_result= image_result.resize((max_image_width_pixels, max_image_height_pixels))
 
 	return image_result
 
