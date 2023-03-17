@@ -39,6 +39,21 @@ class ImageReference:
         self.url_path= url_path
         self.image_layout= image_layout
 
+class ImageServerState:
+    def __init__(self):
+        self.image_references= [] # type: ImageReference
+        self.image_count= 0
+        self.current_image_index= 0
+        # if true, skip the next ImageReference whose layout is portrait because it's already been displayed
+        self.skip_next_portrait= False
+        self.lock= threading.Lock()
+        # list of temp image file names that currently exist - to be deleted next startup if not sooner
+        # TODO: per-chromecast, dictionary
+        self.temp_image_file_names= []
+        self.temp_image_list_file= None # file handle to list of temp image files that need to be deleted on startup
+
+g_image_server_state= ImageServerState()
+
 # Build the URL path:
 # 1. include the root server URL
 # 2. Remove the root of the local_images_path because HTTPHandler uses that as the root directory, so it's
@@ -88,8 +103,8 @@ def main():
     # delete any temp files we created from a previous run (by tracking a list of files)
     # if the list file doesn't exist yet then create it now to track temp files created this run
     if os.path.exists(local_temp_image_list_file_path):
-        temp_image_list_file= open(local_temp_image_list_file_path, "r+")
-        for line in temp_image_list_file:
+        g_image_server_state.temp_image_list_file= open(local_temp_image_list_file_path, "r+")
+        for line in g_image_server_state.temp_image_list_file:
             # make sure to strip out any file path from file names so that any file we delete must be contained
             # in the directory we expect
             file_name_to_delete= local_temp_image_path + os.path.basename(line.strip())
@@ -97,10 +112,10 @@ def main():
                 print("Purging temporary image '%s' from '%s'" % (file_name_to_delete, local_temp_image_list_file_path))
                 os.remove(file_name_to_delete)
         
-        temp_image_list_file.seek(0)
-        temp_image_list_file.truncate()
+        g_image_server_state.temp_image_list_file.seek(0)
+        g_image_server_state.temp_image_list_file.truncate()
     else:
-        temp_image_list_file= open(local_temp_image_list_file_path, "w+")
+        g_image_server_state.temp_image_list_file= open(local_temp_image_list_file_path, "w+")
 
     random.shuffle(image_references)
 
@@ -207,6 +222,86 @@ def main():
     pychromecast.discovery.stop_discovery(browser)
 
 main()
+
+def serve_image(media_controller):
+    if g_image_server_state.lock.acquire():
+        if g_image_server_state.image_count == 0:
+            return
+        served_image= False
+
+        while not served_image:
+            image_reference= g_image_server_state.image_references[g_image_server_state.current_image_index]
+            # Lazily evaluate IsPortrait rather than on startup because it's slow (need to open image file and
+            # potentially transpose it)
+            if image_reference.image_layout == ImageLayout.Unknown:
+                image_reference.image_layout= ImageLayout.Portrait if image_processing.image_is_portait(image_reference.local_image_path) else ImageLayout.Landscape
+
+            if image_reference.image_layout == ImageLayout.Landscape:
+                # Process image on the fly, generate a temporary file to store the processed image
+                temp_image_file_name= local_temp_image_path + str(uuid.uuid4()) + ".jpg"
+                # Update temp_image_file_name in case process_image renamed it
+                temp_image_file_name= image_processing.process_image_file(image_reference.local_image_path, temp_image_file_name)
+                g_image_server_state.temp_image_file_names.append(temp_image_file_name)
+                # generate a temporary image reference to the processed image
+                image_reference= ImageReference(temp_image_file_name, local_image_file_path_to_url(temp_image_file_name), ImageLayout.Landscape)
+            elif g_image_server_state.skip_next_portrait:
+                # If this image is a portait, clear skip_next_portait and skip it
+                g_image_server_state.skip_next_portrait= False
+                # THIS MAY WRAP AROUND BACK TO 0. WE CAN'T HAVE AN INFINITE LOOP BECAUSE WE EARLY-OUT IF THE IMAGE
+                # COUNT IS 0. EVEN IN THE CASE OF A LIST OF JUST TWO ONE IMAGES, EVENTUALLY WE'LL SELECT
+                g_image_server_state.current_image_index= g_image_server_state.current_image_index + 1 % g_image_server_state.image_count
+                continue
+            else: # ImageLayout.Portrait
+                # Find the next portait image in images to splice with
+                # If there is one then set skip_next_portait, splice it with this one, and replace image
+                for search_image_index in range(g_image_server_state.current_image_index + 1, g_image_server_state.image_count):
+                    search_image_reference= g_image_server_state.image_references[search_image_index]
+
+                    # Lazily evaluate IsPortrait rather than on startup because it's slow (need to open image file and
+                    # potentially transpose it)
+                    if search_image_reference.image_layout == ImageLayout.Unknown:
+                        search_image_reference.image_layout= ImageLayout.Portrait if image_processing.image_is_portait(search_image_reference.local_image_path) else ImageLayout.Landscape
+
+                    if search_image_reference.image_layout == ImageLayout.Portrait:
+                        g_image_server_state.skip_next_portrait= True
+                        # Select a temporary file name for the spliced image (generate a unique ID since chromecast caches images
+                        # if we reuse file names)
+                        spliced_image_file_name= local_temp_image_path + str(uuid.uuid4()) + ".jpg"
+                        g_image_server_state.temp_image_file_names.append(spliced_image_file_name)
+                        print("Splicing '%s' + '%s' into '%s'" % (image_reference.local_image_path, search_image_reference.local_image_path, spliced_image_file_name))
+                        # create temporary spliced image
+                        image_processing.splice_images(image_reference.local_image_path, search_image_reference.local_image_path, spliced_image_file_name)
+                        # generate a temporary image reference to the spliced image that now has a landscape layout
+                        image_reference= ImageReference(spliced_image_file_name, local_image_file_path_to_url(spliced_image_file_name), ImageLayout.Landscape)
+                        break
+
+            # clean up temporary spliced images, leave a few around in-case they're still being served
+            if len(g_image_server_state.temp_image_file_names) > 2:
+                to_delete= g_image_server_state.temp_image_file_names.pop(0)
+                if os.path.exists(to_delete):
+                    print("Purging temporary image '%s'" % to_delete)
+                    os.remove(to_delete)
+
+            # update list of temporary image files
+            g_image_server_state.temp_image_list_file.seek(0)
+            g_image_server_state.temp_image_list_file.truncate()
+            for temp_image_file_name in g_image_server_state.temp_image_file_names:
+                g_image_server_state.temp_image_list_file.write(temp_image_file_name + "\n")
+            g_image_server_state.temp_image_list_file.flush()
+
+            extension= os.path.splitext(image_reference.url_path)[1].lower()
+            content_type= content_type_dictionary[extension]
+            media_controller.play_media(image_reference.url_path, content_type)
+            media_controller.block_until_active()
+            time.sleep(slideshow_duration_seconds)
+            served_image= True
+            g_image_server_state.current_image_index= g_image_server_state.current_image_index + 1
+        
+        if g_image_server_state.current_image_index == g_image_server_state.image_count:
+            g_image_server_state.current_image_index= 0
+            random.shuffle(g_image_server_state.image_references)
+
+        g_image_server_state.lock.release()
 
 # Multi Chromecast (Multi Threaded) Architecture
 # image server function: locks, yields and image, manages list of images, manages temp image files
