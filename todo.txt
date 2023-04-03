@@ -1,7 +1,10 @@
 TODO:
 -curate images
+-figure out IP address on linux
 -Support for multiple chromecasts?
---Is this always-on or does it rely on Home Assistant to call it?
+--run in docker containers?
+--serve_image
+---manages a single list of images shared between multiple chromecasts
 -make usable on other machines
 --move config constants to a separate file?
 ---user config for portrait and landscape processing modes?
@@ -21,7 +24,6 @@ TODO:
 --don't do lazy evaluation when looking for next portrait image to splice with, just treat like landscape
 --pre-evaluate the first 10(?) images so that
 --evaluate while waiting for next image instead of sleeping?
--Move to home assistant server
 -try queueing to avoid black screen between images
 --maybe just queuing one image and advancing is sufficient? rely on chromecast device to purge queue?
 --pychromecast API doesn't support queue management. This would require extending it to do so

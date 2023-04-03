@@ -112,7 +112,7 @@ def process_image_file(input_image_file_name, output_image_file_name):
 def get_images_from_local_path(local_image_path):
 	images= []
 	if (os.path.exists(local_image_path)):
-		for dirpath, dirnames, filenames in os.walk(local_image_path):
+		for dirpath, dirnames, filenames in os.walk(local_image_path, followlinks=True):
 			images= images + [
 				os.path.join(dirpath, filename)
 				for filename in filenames
