@@ -1,0 +1,4 @@
+Pillow==9.5.0
+pillow_heif==0.10.0
+PyChromecast==13.0.6
+PyYAML==6.0

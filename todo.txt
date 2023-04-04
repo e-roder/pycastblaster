@@ -1,7 +1,5 @@
 TODO:
 -curate images
--make usable on other machines
---generate python requirements
 -ReadMe:
 --config file
 --options
