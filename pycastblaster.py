@@ -9,17 +9,55 @@ import socket
 import image_processing
 import uuid
 import enum
+import yaml
+import sys
 
-##### config constants - TODO: don't hardcode?
+##### Configurable constants (via config.yaml)
 local_images_path= "images/"
 local_temp_image_path= local_images_path + "temp/" # must be child of local_images_path in order to serve to Chromecast
-local_temp_image_list_file_path= local_temp_image_path + "pycastblaster_temp_files.txt"
 http_server_port= 8000
 # Resize generated images down to this scale, so that they can be loaded faster by chromecast.
 # Adjust to max support resolution of your chromecast.
-image_processing.max_image_height_pixels= 720
-chromecast_friendly_names= ["Family Room TV", "Basement Lights TV"]
+max_image_height_pixels= 720
+chromecast_friendly_name= "Family Room TV"
 slideshow_duration_seconds= 5
+
+# Not configurable (no need to expose additional complexity)
+local_temp_image_list_file_name= "pycastblaster_temp_files.txt"
+local_temp_image_list_file_path= local_temp_image_path + local_temp_image_list_file_name
+
+def load_config():
+    config_file_path= "config.yaml" if (len(sys.argv) == 1) else sys.argv[1]
+
+    if not os.path.exists(config_file_path):
+        print("No config file '%s', using default values" % config_file_path)
+    else:
+        with open(config_file_path) as config_file:
+            config_yaml= yaml.safe_load(config_file)
+
+            global local_images_path
+            global local_temp_image_path
+            global local_temp_image_list_file_path
+            global http_server_port
+            global chromecast_friendly_name
+            global slideshow_duration_seconds
+
+            if "images_path" in config_yaml: local_images_path= config_yaml["images_path"]
+            # local_temp_image_path must be child of local_images_path in order to serve to Chromecast
+            if "temp_directory" in config_yaml:
+                local_temp_image_path= os.path.join(local_images_path, config_yaml["temp_directory"])
+                # have the default local_temp_image_list_file_path be relative to local_temp_image_path
+                local_temp_image_list_file_path= os.path.join(local_temp_image_path, local_temp_image_list_file_name)
+            if "http_server_port" in config_yaml: http_server_port= int(config_yaml["http_server_port"])
+            if "chromecast_name" in config_yaml: chromecast_friendly_name= config_yaml["chromecast_name"]
+            if "slideshow_duration_seconds" in config_yaml: slideshow_duration_seconds= float(config_yaml["slideshow_duration_seconds"])
+            if "max_image_height_pixels" in config_yaml: max_image_height_pixels= int(config_yaml["max_image_height_pixels"])
+
+# We must load the config before setting...
+#   -server_url, since it references http_server_port
+#   -image_processing.max_image_height_pixels, since we can't modify it from inside load_config(), we have to redirect through a global
+
+load_config()
 
 # In Ubuntu, socket.gethostbyname(socket.gethostname()) returns '127.0.0.1', instead of 192.168.0.X
 # Per, https://stackoverflow.com/questions/166506/finding-local-ip-addresses-using-pythons-stdlib, this will return
@@ -38,6 +76,7 @@ def get_ip():
         return IP
 
 server_url= "http://" + get_ip() + ":" + str(http_server_port)
+image_processing.max_image_height_pixels= max_image_height_pixels
 
 # file extension to MIME type
 content_type_dictionary= {
@@ -127,7 +166,7 @@ def main():
     pychromecast.discovery.stop_discovery(browser)
 
     # Discover and connect to chromecasts named Living Room
-    chromecasts, browser = pychromecast.get_listed_chromecasts(friendly_names=chromecast_friendly_names)
+    chromecasts, browser = pychromecast.get_listed_chromecasts(friendly_names=[chromecast_friendly_name])
 
     cast = chromecasts[0]
     # Start worker thread and wait for cast device to be ready

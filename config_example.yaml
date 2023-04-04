@@ -1,0 +1,5 @@
+images_path: "images"
+temp_directory: "temp2" # temp_directory will be placed relative to images_path
+http_server_port: 8001
+chromecast_name: "Family Room TV"
+slideshow_duration_seconds: 15

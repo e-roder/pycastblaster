@@ -139,3 +139,6 @@ image_cache.txt
 
 # VS Code files
 /.vscode
+
+#Config
+config.yaml

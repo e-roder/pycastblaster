@@ -1,15 +1,10 @@
 TODO:
 -curate images
--figure out IP address on linux
--Support for multiple chromecasts?
---run in docker containers?
---serve_image
----manages a single list of images shared between multiple chromecasts
 -make usable on other machines
---move config constants to a separate file?
----user config for portrait and landscape processing modes?
---figure out how to make image processing callable from command line
 --generate python requirements
+-ReadMe:
+--config file
+--options
 --disclaimer about Linux only due to pychromecast networking using poll()
 -refresh image list in background thread, swap between iterations?
 -UI/UX: via webserver?
