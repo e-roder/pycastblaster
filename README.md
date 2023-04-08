@@ -15,6 +15,9 @@ The program can be configured with a YAML file, "config.yaml" by default. You ca
 `python3 pycastblaster config2.yaml`
 
 **Options:**
+
+| Name | Description | Default Value |
+| ---- | ----------- | ------------- |
 | images_path | Local or network mapped directory to select images from. Image order is randomized. | *./images* |
 | temp_directory | Name of directory for storing temporary image files. This directory will be created inside 'images_path' (no need to create it manually). | *temp* |
 | http_server_port | Port to serve images from (this is how they are accessed by the Chromecast).  | 8000 |
