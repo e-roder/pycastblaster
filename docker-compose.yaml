@@ -1,0 +1,12 @@
+version: '3'
+services:
+  pycastblaster_test:
+    container_name: pycastblaster_test
+    image: "pycastblaster"
+    volumes:
+      # NOTE: Mapping to /images/nas, not just /images, so that the temp directory isn't created in /media/nas/images
+      - /media/nas/images:/home/pycastblaster/images/nas
+    restart: unless-stopped
+    network_mode: host
+    stdin_open: true
+    tty: true

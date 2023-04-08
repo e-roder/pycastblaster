@@ -12,7 +12,7 @@ Example usage:
 
 ## Configuration
 The program can be configured with a YAML file, "config.yaml" by default. You can specify a config file as a command line option, e.g.
-`python3 pycastblaster config2.yaml`
+`python3 pycastblaster config2.yaml`.
 
 **Options:**
 
@@ -36,3 +36,13 @@ You'll want to make sure the following options are unique for each device:
 
 ## Refresh Behavior
 Currently there's no support for refreshing the list of images or adjusting the slideshow time while running, but it's on the TODO list.
+
+## Using with Docker
+Included are two example files for use with Docker: dockerfile and docker-compose.yaml.
+
+dockerfile assumes...
+-There's a config_example.yaml file adjacent to it (config_example.yaml is conveniently included).
+
+docker-compose.yaml assumes...
+-You have named your docker image 'pycastblaster'
+-The images you want to cast are in /media/nas/images
