@@ -1,7 +1,7 @@
 # Pycastblaster
 A python program to manage and cast images from a local or network drive to Chromecast devices. Leave this program running and it will detect when a specific Chromecast device on the network turns on and start casting to it (work in progress).
 
-**This program only runs on Linux, because the pychromecast library uses the network function `poll()` which is not supported on Windows.***
+**This program only runs on Linux, because the pychromecast library uses the network function `poll()` which is not supported on Windows.**
 
 Example usage:
 `python3 pycastblaster`
@@ -15,11 +15,10 @@ The program can be configured with a YAML file, "config.yaml" by default. You ca
 `python3 pycastblaster config2.yaml`
 
 **Options:**
-| Name | Description | Default Value |
 | images_path | Local or network mapped directory to select images from. Image order is randomized. | *./images* |
 | temp_directory | Name of directory for storing temporary image files. This directory will be created inside 'images_path' (no need to create it manually). | *temp* |
 | http_server_port | Port to serve images from (this is how they are accessed by the Chromecast).  | 8000 |
-| chromecast_name | Name of the Chromecast, configured in the Google Home app. [https://support.google.com/googlenest/answer/7550874?hl=en] | "Family Room TV"
+| chromecast_name | Name of the Chromecast, configured in the Google Home app. https://support.google.com/googlenest/answer/7550874?hl=en | "Family Room TV" |
 | slideshow_duration_seconds | How many seconds before advancing to the next image. | 15 |
 | max_image_height_pixels | Display resolution of your Chromecast, usually 720 or 1080. | 720 |
 
