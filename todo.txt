@@ -1,15 +1,12 @@
 TODO:
 -curate images
--ReadMe:
---config file
---options
---disclaimer about Linux only due to pychromecast networking using poll()
+-Add docker example
+-More robust error handling
+--reconnect to chromecast
 -refresh image list in background thread, swap between iterations?
 -UI/UX: via webserver?
 --graceful exit
 --reload settings (e.g. slideshow length) on the fly
--More robust error handling
---reconnect to chromecast
 -image processing
 --black dividing line between spliced images?
 -improve lazy evaluation of is_portait to better handle worst-case scenarios
