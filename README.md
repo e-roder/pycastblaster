@@ -41,8 +41,8 @@ Currently there's no support for refreshing the list of images or adjusting the 
 Included are two example files for use with Docker: dockerfile and docker-compose.yaml.
 
 dockerfile assumes...
--There's a config_example.yaml file adjacent to it (config_example.yaml is conveniently included).
+- There's a config_example.yaml file adjacent to it (config_example.yaml is conveniently included).
 
 docker-compose.yaml assumes...
--You have named your docker image 'pycastblaster'
--The images you want to cast are in /media/nas/images
+- You have named your docker image 'pycastblaster'
+- The images you want to cast are in /media/nas/images
