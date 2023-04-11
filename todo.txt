@@ -1,12 +1,14 @@
 TODO:
 -curate images
--Add docker example
 -More robust error handling
 --reconnect to chromecast
--refresh image list in background thread, swap between iterations?
+-preserve image list progress so that we don't replay the same images
+-refresh image list in background thread, swap between iterations? merge (adding new images only) mid-iteration?
+-don't interrupt active media, yield to active media
 -UI/UX: via webserver?
 --graceful exit
 --reload settings (e.g. slideshow length) on the fly
+---or auto-reload settings by scanning config file?
 -image processing
 --black dividing line between spliced images?
 -improve lazy evaluation of is_portait to better handle worst-case scenarios
