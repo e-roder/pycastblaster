@@ -23,6 +23,7 @@ http_server_port= 8000
 max_image_height_pixels= 720
 chromecast_friendly_name= "Family Room TV"
 slideshow_duration_seconds= 5
+interruption_idle_seconds= 10
 
 # Not configurable (no need to expose additional complexity)
 local_temp_image_list_file_name= "pycastblaster_temp_files.txt"
@@ -43,6 +44,7 @@ def load_config():
             global http_server_port
             global chromecast_friendly_name
             global slideshow_duration_seconds
+            global interruption_idle_seconds
 
             if "images_path" in config_yaml: local_images_path= config_yaml["images_path"]
             # local_temp_image_path must be child of local_images_path in order to serve to Chromecast
@@ -54,6 +56,7 @@ def load_config():
             if "chromecast_name" in config_yaml: chromecast_friendly_name= config_yaml["chromecast_name"]
             if "slideshow_duration_seconds" in config_yaml: slideshow_duration_seconds= float(config_yaml["slideshow_duration_seconds"])
             if "max_image_height_pixels" in config_yaml: max_image_height_pixels= int(config_yaml["max_image_height_pixels"])
+            if "interruption_idle_seconds" in config_yaml: interruption_idle_seconds= int(config_yaml["interruption_idle_seconds"])
 
 # We must load the config before setting...
 #   -server_url, since it references http_server_port
@@ -120,88 +123,117 @@ def web_server_thread():
 
 class ImageServerThread(threading.Thread):
     def __init__(self, caster, image_references, temp_image_list_file, temp_image_file_names):
-        threading.Thread.__init__(self)
-        self.stop_thread_event= threading.Event()
+        threading.Thread.__init__(self, daemon=True)
+        
+        # Synchronization: internal events, use start_serving and stop_serving_and_wait
+        self.should_serve= threading.Event()
+        self.not_serving= threading.Event()
+        self.not_serving.set()
+
         self.caster= caster
         self.image_references= image_references
         self.temp_image_list_file= temp_image_list_file
         self.temp_image_file_names= temp_image_file_names
 
     def run(self):
+        while True: # Keep alive forever
+            self.should_serve.wait()
+            self.not_serving.clear()
+            self.serve_images()
+            self.not_serving.set()
+            random.shuffle(self.image_references)
+
+    def start_serving(self):
+        self.should_serve.set()
+
+    def stop_serving_and_wait(self):
+        self.should_serve.clear()
+        return self.not_serving.wait()
+
+    def serve_images(self):
         # When we splice one portrait image with the next one in the list, we don't want to display that image
         # when we encounter it so we set this bool to ignore it.
         skip_next_portrait= False
         image_count= len(self.image_references)
 
-        while (not self.stop_thread_event.is_set()):
-            for image_index, image_reference in enumerate(self.image_references):
-                # Lazily evaluate IsPortrait rather than on startup because it's slow (need to open image file and
-                # potentially transpose it)
-                if image_reference.image_layout == ImageLayout.Unknown:
-                    image_reference.image_layout= ImageLayout.Portrait if image_processing.image_is_portait(image_reference.local_image_path) else ImageLayout.Landscape
-                    self.image_references[image_index]= image_reference # Update list of images so we don't need to evaluate this image again
+        for image_index, image_reference in enumerate(self.image_references):
+            # Lazily evaluate IsPortrait rather than on startup because it's slow (need to open image file and
+            # potentially transpose it)
+            if image_reference.image_layout == ImageLayout.Unknown:
+                image_reference.image_layout= ImageLayout.Portrait if image_processing.image_is_portait(image_reference.local_image_path) else ImageLayout.Landscape
+                self.image_references[image_index]= image_reference # Update list of images so we don't need to evaluate this image again
 
-                if image_reference.image_layout == ImageLayout.Landscape:
-                    # Process image on the fly, generate a temporary file to store the processed image
-                    temp_image_file_name= os.path.join(local_temp_image_path, str(uuid.uuid4())) + ".jpg"
-                    # Update temp_image_file_name in case process_image renamed it
-                    temp_image_file_name= image_processing.process_image_file(image_reference.local_image_path, temp_image_file_name)
-                    self.temp_image_file_names.append(temp_image_file_name)
-                    # generate a temporary image reference to the processed image
-                    image_reference= ImageReference(temp_image_file_name, local_image_file_path_to_url(temp_image_file_name), ImageLayout.Landscape)
-                elif skip_next_portrait:
-                    # If this image is a portait, clear skip_next_portait and skip it
-                    skip_next_portrait= False
-                    continue
-                else: # ImageLayout.Portrait
-                    # Find the next portait image in images to splice with
-                    # If there is one then set skip_next_portait, splice it with this one, and replace image
-                    for search_image_index in range(image_index + 1, image_count):
-                        search_image= self.image_references[search_image_index]
+            if image_reference.image_layout == ImageLayout.Landscape:
+                # Process image on the fly, generate a temporary file to store the processed image
+                temp_image_file_name= os.path.join(local_temp_image_path, str(uuid.uuid4())) + ".jpg"
+                # Update temp_image_file_name in case process_image renamed it
+                temp_image_file_name= image_processing.process_image_file(image_reference.local_image_path, temp_image_file_name)
+                self.temp_image_file_names.append(temp_image_file_name)
+                # generate a temporary image reference to the processed image
+                image_reference= ImageReference(temp_image_file_name, local_image_file_path_to_url(temp_image_file_name), ImageLayout.Landscape)
+            elif skip_next_portrait:
+                # If this image is a portait, clear skip_next_portait and skip it
+                skip_next_portrait= False
+                continue
+            else: # ImageLayout.Portrait
+                # Find the next portait image in images to splice with
+                # If there is one then set skip_next_portait, splice it with this one, and replace image
+                for search_image_index in range(image_index + 1, image_count):
+                    search_image= self.image_references[search_image_index]
 
-                        # Lazily evaluate IsPortrait rather than on startup because it's slow (need to open image file and
-                        # potentially transpose it)
-                        if search_image.image_layout == ImageLayout.Unknown:
-                            search_image.image_layout= ImageLayout.Portrait if image_processing.image_is_portait(search_image.local_image_path) else ImageLayout.Landscape
-                            # Update list of images so we don't need to evaluate this image again
-                            self.image_references[search_image_index]= search_image
+                    # Lazily evaluate IsPortrait rather than on startup because it's slow (need to open image file and
+                    # potentially transpose it)
+                    if search_image.image_layout == ImageLayout.Unknown:
+                        search_image.image_layout= ImageLayout.Portrait if image_processing.image_is_portait(search_image.local_image_path) else ImageLayout.Landscape
+                        # Update list of images so we don't need to evaluate this image again
+                        self.image_references[search_image_index]= search_image
 
-                        if search_image.image_layout == ImageLayout.Portrait:
-                            skip_next_portrait= True
-                            # Select a temporary file name for the spliced image (generate a unique ID since chromecast caches images
-                            # if we reuse file names)
-                            spliced_image_file_name= os.path.join(local_temp_image_path, str(uuid.uuid4())) + ".jpg"
-                            self.temp_image_file_names.append(spliced_image_file_name)
-                            print("Splicing '%s' + '%s' into '%s'" % (image_reference.local_image_path, search_image.local_image_path, spliced_image_file_name))
-                            # create temporary spliced image
-                            image_processing.splice_images(image_reference.local_image_path, search_image.local_image_path, spliced_image_file_name)
-                            # generate a temporary image reference to the spliced image that now has a landscape layout
-                            image_reference= ImageReference(spliced_image_file_name, local_image_file_path_to_url(spliced_image_file_name), ImageLayout.Landscape)
-                            break
+                    if search_image.image_layout == ImageLayout.Portrait:
+                        skip_next_portrait= True
+                        # Select a temporary file name for the spliced image (generate a unique ID since chromecast caches images
+                        # if we reuse file names)
+                        spliced_image_file_name= os.path.join(local_temp_image_path, str(uuid.uuid4())) + ".jpg"
+                        self.temp_image_file_names.append(spliced_image_file_name)
+                        print("Splicing '%s' + '%s' into '%s'" % (image_reference.local_image_path, search_image.local_image_path, spliced_image_file_name))
+                        # create temporary spliced image
+                        image_processing.splice_images(image_reference.local_image_path, search_image.local_image_path, spliced_image_file_name)
+                        # generate a temporary image reference to the spliced image that now has a landscape layout
+                        image_reference= ImageReference(spliced_image_file_name, local_image_file_path_to_url(spliced_image_file_name), ImageLayout.Landscape)
+                        break
 
-                # clean up temporary spliced images, leave a few around in-case they're still being served
-                if len(self.temp_image_file_names) > 2:
-                    to_delete= self.temp_image_file_names.pop(0)
-                    if os.path.exists(to_delete):
-                        print("Purging temporary image '%s'" % to_delete)
-                        os.remove(to_delete)
+            # clean up temporary spliced images, leave a few around in-case they're still being served
+            if len(self.temp_image_file_names) > 2:
+                to_delete= self.temp_image_file_names.pop(0)
+                if os.path.exists(to_delete):
+                    print("Purging temporary image '%s'" % to_delete)
+                    os.remove(to_delete)
 
-                # update list of temporary image files
-                self.temp_image_list_file.seek(0)
-                self.temp_image_list_file.truncate()
-                for temp_image_file_name in self.temp_image_file_names:
-                    self.temp_image_list_file.write(temp_image_file_name + "\n")
-                self.temp_image_list_file.flush()
+            # update list of temporary image files
+            self.temp_image_list_file.seek(0)
+            self.temp_image_list_file.truncate()
+            for temp_image_file_name in self.temp_image_file_names:
+                self.temp_image_list_file.write(temp_image_file_name + "\n")
+            self.temp_image_list_file.flush()
 
-                if not self.caster.try_to_play_media(image_reference.url_path):
-                    # If we failed to play media, the Chromecast probably disconnected, so stop trying to serve images
-                    # before we trigger some exception in the pychromecast library
-                    self.stop_thread_event.set()
-                    print("Stopping Image Server thread because we failed to play media (timed out?).")
-                    break
-                time.sleep(slideshow_duration_seconds)
-            
-            random.shuffle(self.image_references)
+            if not self.caster.try_to_play_media(image_reference.url_path):
+                # If we failed to play media, the Chromecast probably disconnected, so stop trying to serve images
+                # before we trigger some exception in the pychromecast library
+                self.should_serve.clear()
+                print("Stopping Image Server thread because we failed to play media (timed out?).")
+                break
+
+            # The casting thread signaled that we should stop, e.g. the Chromecast was removed (turned off?)
+            if not self.should_serve.is_set():
+                break
+
+            time.sleep(slideshow_duration_seconds)
+
+class CanCastResult(enum.IntEnum):
+    Success= 0
+    FailNotConnected= 1
+    FailNoStatus= 2
+    FailExpectedActived= 3
+    FailInUse= 4
 
 class ChromeCastPoller:
     def __init__(self, chromecast_friendly_name, image_references, temp_image_list_file, temp_image_file_names):
@@ -215,13 +247,8 @@ class ChromeCastPoller:
                         self.stop_image_server()
 
                     self.chromecast= pychromecast.get_chromecast_from_cast_info(self.browser.devices[uuid], zconf=self.browser.zc, tries= 2, retry_wait= 2.0, timeout= 5.0)
-                    self.chromecast.wait() # Wait to connect before starting the image server                 
-                    self.image_serving_thread= ImageServerThread(self, self.image_references, self.temp_image_list_file, self.temp_image_file_names)
-                    
-                    # Release the lock *before* starting the image_serving_thread so that it doesn't fail to acquire the cast_lock on the first (few?) iterations
+                    self.chromecast.wait() # Wait to connect before releasing self.cast_lock and allowing wait_for_idle to start the image server
                     self.cast_lock.release()
-
-                    self.image_serving_thread.start()
 
         def remove_callback(uuid, _service, cast_info):
             print("Chromecast removed %s (%s)", self.browser.devices[uuid].friendly_name, uuid)
@@ -239,14 +266,20 @@ class ChromeCastPoller:
 
         self.browser= pychromecast.discovery.CastBrowser(pychromecast.discovery.SimpleCastListener(add_callback, remove_callback), zeroconf.Zeroconf())
         self.friendly_name= chromecast_friendly_name
-        self.cast_lock= threading.Lock()
+        self.cast_lock= threading.RLock() # making this a reentrant lock so that can_cast() can take the lock, to make sure it's always thread-safe to use
         self.chromecast= None
-        self.image_serving_thread= None
 
         # plumbing to image_server_thread
         self.image_references= image_references
         self.temp_image_list_file= temp_image_list_file
         self.temp_image_file_names= temp_image_file_names
+
+        self.image_serving_thread= ImageServerThread(self, self.image_references, self.temp_image_list_file, self.temp_image_file_names)
+        self.image_serving_thread.start() # Will block on self.image_serving_thread.should_serve
+
+        # Start a separate thread to wait for the Chromecast to be idle rather than blocking this one
+        self.wait_for_idle_thread= threading.Thread(target= self.wait_for_idle, daemon= True)
+        self.wait_for_idle_thread.start()
         
         self.browser.start_discovery()
 
@@ -259,24 +292,74 @@ class ChromeCastPoller:
                 self.browser.stop_discovery()
 
     def stop_image_server(self):
-        self.image_serving_thread.stop_thread_event.set()
-        self.image_serving_thread.join()
+        self.image_serving_thread.stop_serving_and_wait()
+
+    def can_cast(self, must_be_active):
+        result= (False, "")
+
+        if self.cast_lock.acquire():    
+            if (not self.chromecast or
+                not self.chromecast.socket_client or
+                not self.chromecast.socket_client.is_connected):
+                    result= (CanCastResult.FailNotConnected, "Not connected")
+            elif self.chromecast.status is None:
+                result= (CanCastResult.FailNoStatus, "No Status")
+                # We can't really disambiguate between "Somebody else is using the default media receiver app" and
+                # "We are using the Default Media Receiver app, or were and then restarted our program" so just treat
+                # it as if nobody else is trying to cast right now... :/ Maybe we could look at what media is currently playing and see
+                # if it's coming from our server?
+            elif must_be_active and not self.chromecast.app_id == pychromecast.APP_MEDIA_RECEIVER:
+                result= (CanCastResult.FailExpectedActived, "Expected Chromecast to be casting, maybe somebody is starting to cast")
+            elif not self.chromecast.app_id in (None, pychromecast.IDLE_APP_ID, pychromecast.APP_MEDIA_RECEIVER):
+                result= (CanCastResult.FailInUse, "Chromecast in use by '%s' (%s)" % (self.chromecast.app_display_name, self.chromecast.app_id))
+            else:
+                result= (CanCastResult.Success, "")
+
+            self.cast_lock.release()
+        
+        return result
+
+    def wait_for_idle(self):
+        was_active= False
+        while True: # keep the thread alive forever
+            self.image_serving_thread.not_serving.wait()
+            
+            if was_active:
+                print("Bonus interruption idle (%f s): We got interrupted, so maybe something else is trying to start" % interruption_idle_seconds)
+                time.sleep(interruption_idle_seconds)
+
+            can_cast, reason= self.can_cast(must_be_active= False)
+            if can_cast == CanCastResult.Success:
+                self.chromecast.media_controller.launch()
+                self.chromecast.media_controller.block_until_active(10)
+                self.image_serving_thread.start_serving()
+                was_active= True
+            else:
+                was_active= False
+                print("Blocking for idle, reason: %s" % reason)
+
+            time.sleep(5)
 
     def try_to_play_media(self, url):
         success= False
         # Don't block, in order to avoid deadlocks when remove_callback has been called and is trying to signal image_serving_thread to stop.
-        if self.cast_lock.acquire(blocking= False):
-            extension= os.path.splitext(url)[1].lower()
-            content_type= content_type_dictionary[extension]
-            print("Serving '%s'" % url)
-            try:
-                self.chromecast.media_controller.play_media(url, content_type)
-                self.chromecast.media_controller.block_until_active(timeout=1.0)
-                success= self.chromecast.media_controller.session_active_event.is_set()
-            except pychromecast.error.NotConnected:
-                print("Couldn't play media, Chromecast not connected")
-            except pychromecast.error.ControllerNotRegistered:
-                print("Couldn't play media, Controller not registered")
+        # Do wait for a little bit though, so that the image serving thread doesn't fail the first few iterations while waiting for the lock to be released
+        if self.cast_lock.acquire(timeout= 1):
+            can_cast, reason= self.can_cast(must_be_active=True)
+            if can_cast == CanCastResult.Success:
+                extension= os.path.splitext(url)[1].lower()
+                content_type= content_type_dictionary[extension]
+                print("Serving '%s'" % url)
+                try:
+                    self.chromecast.media_controller.play_media(url, content_type)
+                    self.chromecast.media_controller.block_until_active(timeout=1.0)
+                    success= self.chromecast.media_controller.session_active_event.is_set()
+                except pychromecast.error.NotConnected:
+                    print("Couldn't play media, Chromecast not connected")
+                except pychromecast.error.ControllerNotRegistered:
+                    print("Couldn't play media, Controller not registered")
+            else:
+                print("Couldn't play media, reason: %s" % reason)
 
             self.cast_lock.release()
         
