@@ -14,20 +14,24 @@ import yaml
 import sys
 import zeroconf
 
-##### Configurable constants (via config.yaml)
-local_images_path= "images/"
-local_temp_image_path= local_images_path + "temp/" # must be child of local_images_path in order to serve to Chromecast
-http_server_port= 8000
-# Resize generated images down to this scale, so that they can be loaded faster by chromecast.
-# Adjust to max support resolution of your chromecast.
-max_image_height_pixels= 720
-chromecast_friendly_name= "Family Room TV"
-slideshow_duration_seconds= 5
-interruption_idle_seconds= 10
+class Config:
+    def __init__(self) -> None:
+        ##### Configurable constants (via config.yaml)
+        self.local_images_path= "images/"
+        self.local_temp_image_path= self.local_images_path + "temp/" # must be child of local_images_path in order to serve to Chromecast
+        self.http_server_port= 8000
+        # Resize generated images down to this scale, so that they can be loaded faster by chromecast.
+        # Adjust to max support resolution of your chromecast.
+        self.max_image_height_pixels= 720
+        self.chromecast_friendly_name= "Family Room TV"
+        self.slideshow_duration_seconds= 5
+        self.interruption_idle_seconds= 10
 
-# Not configurable (no need to expose additional complexity)
-local_temp_image_list_file_name= "pycastblaster_temp_files.txt"
-local_temp_image_list_file_path= os.path.join(local_temp_image_path, local_temp_image_list_file_name)
+        # Not configurable (no need to expose additional complexity)
+        self.local_temp_image_list_file_name= "pycastblaster_temp_files.txt"
+        self.local_temp_image_list_file_path= os.path.join(self.local_temp_image_path, self.local_temp_image_list_file_name)
+
+g_config= Config()
 
 def load_config():
     config_file_path= "config.yaml" if (len(sys.argv) == 1) else sys.argv[1]
@@ -38,26 +42,19 @@ def load_config():
         with open(config_file_path) as config_file:
             config_yaml= yaml.safe_load(config_file)
 
-            global local_images_path
-            global local_temp_image_path
-            global local_temp_image_list_file_path
-            global http_server_port
-            global chromecast_friendly_name
-            global slideshow_duration_seconds
-            global max_image_height_pixels
-            global interruption_idle_seconds
+            global g_config
 
-            if "images_path" in config_yaml: local_images_path= config_yaml["images_path"]
+            if "images_path" in config_yaml: g_config.local_images_path= config_yaml["images_path"]
             # local_temp_image_path must be child of local_images_path in order to serve to Chromecast
             if "temp_directory" in config_yaml:
-                local_temp_image_path= os.path.join(local_images_path, config_yaml["temp_directory"])
+                g_config.local_temp_image_path= os.path.join(g_config.local_images_path, config_yaml["temp_directory"])
                 # have the default local_temp_image_list_file_path be relative to local_temp_image_path
-                local_temp_image_list_file_path= os.path.join(local_temp_image_path, local_temp_image_list_file_name)
-            if "http_server_port" in config_yaml: http_server_port= int(config_yaml["http_server_port"])
-            if "chromecast_name" in config_yaml: chromecast_friendly_name= config_yaml["chromecast_name"]
-            if "slideshow_duration_seconds" in config_yaml: slideshow_duration_seconds= float(config_yaml["slideshow_duration_seconds"])
-            if "max_image_height_pixels" in config_yaml: max_image_height_pixels= int(config_yaml["max_image_height_pixels"])
-            if "interruption_idle_seconds" in config_yaml: interruption_idle_seconds= int(config_yaml["interruption_idle_seconds"])
+                g_config.local_temp_image_list_file_path= os.path.join(g_config.local_temp_image_path, g_config.local_temp_image_list_file_name)
+            if "http_server_port" in config_yaml: g_config.http_server_port= int(config_yaml["http_server_port"])
+            if "chromecast_name" in config_yaml: g_config.chromecast_friendly_name= config_yaml["chromecast_name"]
+            if "slideshow_duration_seconds" in config_yaml: g_config.slideshow_duration_seconds= float(config_yaml["slideshow_duration_seconds"])
+            if "max_image_height_pixels" in config_yaml: g_config.max_image_height_pixels= int(config_yaml["max_image_height_pixels"])
+            if "interruption_idle_seconds" in config_yaml: g_config.interruption_idle_seconds= int(config_yaml["interruption_idle_seconds"])
 
 # We must load the config before setting...
 #   -server_url, since it references http_server_port
@@ -81,8 +78,8 @@ def get_ip():
             s.close()
         return IP
 
-server_url= "http://" + get_ip() + ":" + str(http_server_port)
-image_processing.max_image_height_pixels= max_image_height_pixels
+server_url= "http://" + get_ip() + ":" + str(g_config.http_server_port)
+image_processing.max_image_height_pixels= g_config.max_image_height_pixels
 
 # file extension to MIME type
 content_type_dictionary= {
@@ -106,20 +103,20 @@ class ImageReference:
 # 2. Remove the root of the local_images_path because HTTPHandler uses that as the root directory, so it's
 # not included.
 def local_image_file_path_to_url(local_image_file_path):
-    return server_url + "/" + os.path.relpath(local_image_file_path, local_images_path)
+    return server_url + "/" + os.path.relpath(local_image_file_path, g_config.local_images_path)
 
 # Convert a URL path (for a URL served by *our* HTTP server) back to a local path
 def url_to_local_image_file_path(url):
-    return local_images_path + url[len(server_url + "/"):]
+    return g_config.local_images_path + url[len(server_url + "/"):]
 
 # Custom class in order to serve up a specific subdirectory
 class HTTPHandler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, directory=local_images_path, **kwargs)
+        super().__init__(*args, directory=g_config.local_images_path, **kwargs)
 
 def web_server_thread():
-    with http.server.ThreadingHTTPServer(("", http_server_port), HTTPHandler) as http_server:
-        print("serving at port", http_server_port)
+    with http.server.ThreadingHTTPServer(("", g_config.http_server_port), HTTPHandler) as http_server:
+        print("serving at port", g_config.http_server_port)
         http_server.serve_forever()
 
 class ImageServerThread(threading.Thread):
@@ -166,7 +163,7 @@ class ImageServerThread(threading.Thread):
 
             if image_reference.image_layout == ImageLayout.Landscape:
                 # Process image on the fly, generate a temporary file to store the processed image
-                temp_image_file_name= os.path.join(local_temp_image_path, str(uuid.uuid4())) + ".jpg"
+                temp_image_file_name= os.path.join(g_config.local_temp_image_path, str(uuid.uuid4())) + ".jpg"
                 # Update temp_image_file_name in case process_image renamed it
                 temp_image_file_name= image_processing.process_image_file(image_reference.local_image_path, temp_image_file_name)
                 self.temp_image_file_names.append(temp_image_file_name)
@@ -193,7 +190,7 @@ class ImageServerThread(threading.Thread):
                         skip_next_portrait= True
                         # Select a temporary file name for the spliced image (generate a unique ID since chromecast caches images
                         # if we reuse file names)
-                        spliced_image_file_name= os.path.join(local_temp_image_path, str(uuid.uuid4())) + ".jpg"
+                        spliced_image_file_name= os.path.join(g_config.local_temp_image_path, str(uuid.uuid4())) + ".jpg"
                         self.temp_image_file_names.append(spliced_image_file_name)
                         print("Splicing '%s' + '%s' into '%s'" % (image_reference.local_image_path, search_image.local_image_path, spliced_image_file_name))
                         # create temporary spliced image
@@ -227,7 +224,7 @@ class ImageServerThread(threading.Thread):
             if not self.should_serve.is_set():
                 break
 
-            time.sleep(slideshow_duration_seconds)
+            time.sleep(g_config.slideshow_duration_seconds)
 
 class CanCastResult(enum.IntEnum):
     Success= 0
@@ -326,8 +323,8 @@ class ChromeCastPoller:
             self.image_serving_thread.not_serving.wait()
             
             if was_active:
-                print("Bonus interruption idle (%f s): We got interrupted, so maybe something else is trying to start" % interruption_idle_seconds)
-                time.sleep(interruption_idle_seconds)
+                print("Bonus interruption idle (%f s): We got interrupted, so maybe something else is trying to start" % g_config.interruption_idle_seconds)
+                time.sleep(g_config.interruption_idle_seconds)
 
             can_cast, reason= self.can_cast(must_be_active= False)
             if can_cast == CanCastResult.Success:
@@ -383,7 +380,7 @@ def main():
     random.seed()
 
     print("Serving local directory '%s' and spinning up HTTP server '%s'" % (
-        local_images_path,
+        g_config.local_images_path,
         server_url))
     
     # Build images as a tuple of (URL path, is_portait). is_portait lets us quickly find and splice portrait
@@ -391,37 +388,37 @@ def main():
     # -Skip images that are in local_spliced_image_path (maybe left-over from a previous run)        
     image_references= [
         ImageReference(image_path, local_image_file_path_to_url(image_path), ImageLayout.Unknown)
-        for image_path in image_processing.get_images_from_local_path(local_images_path)
-            if not image_path.startswith(local_temp_image_path)]
+        for image_path in image_processing.get_images_from_local_path(g_config.local_images_path)
+            if not image_path.startswith(g_config.local_temp_image_path)]
     # Spin up a separate thread to run a web server. The server exposes images in local_images_path to the Chromecast
     threading.Thread(target= web_server_thread).start()
 
     # Make sure the spliced image path exists since it's for files generated by the application, don't expect
     # users to create it
-    if not os.path.exists(local_temp_image_path):
-        os.makedirs(local_temp_image_path)
+    if not os.path.exists(g_config.local_temp_image_path):
+        os.makedirs(g_config.local_temp_image_path)
 
     # delete any temp files we created from a previous run (by tracking a list of files)
     # if the list file doesn't exist yet then create it now to track temp files created this run
-    if os.path.exists(local_temp_image_list_file_path):
-        temp_image_list_file= open(local_temp_image_list_file_path, "r+")
+    if os.path.exists(g_config.local_temp_image_list_file_path):
+        temp_image_list_file= open(g_config.local_temp_image_list_file_path, "r+")
         for line in temp_image_list_file:
             # make sure to strip out any file path from file names so that any file we delete must be contained
             # in the directory we expect
-            file_name_to_delete= os.path.join(local_temp_image_path, os.path.basename(line.strip()))
+            file_name_to_delete= os.path.join(g_config.local_temp_image_path, os.path.basename(line.strip()))
             if os.path.exists(file_name_to_delete):
-                print("Purging temporary image '%s' from '%s'" % (file_name_to_delete, local_temp_image_list_file_path))
+                print("Purging temporary image '%s' from '%s'" % (file_name_to_delete, g_config.local_temp_image_list_file_path))
                 os.remove(file_name_to_delete)
         
         temp_image_list_file.seek(0)
         temp_image_list_file.truncate()
     else:
-        temp_image_list_file= open(local_temp_image_list_file_path, "w+")
+        temp_image_list_file= open(g_config.local_temp_image_list_file_path, "w+")
 
     random.shuffle(image_references)
 
     temp_image_file_names= []
-    caster= ChromeCastPoller(chromecast_friendly_name, image_references, temp_image_list_file, temp_image_file_names)
+    caster= ChromeCastPoller(g_config.chromecast_friendly_name, image_references, temp_image_list_file, temp_image_file_names)
 
     # Quit gracefully (stops casting session)
     exit= False # nothing sets this now but we can poke it in the debugger
