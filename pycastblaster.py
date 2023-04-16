@@ -44,6 +44,7 @@ def load_config():
             global http_server_port
             global chromecast_friendly_name
             global slideshow_duration_seconds
+            global max_image_height_pixels
             global interruption_idle_seconds
 
             if "images_path" in config_yaml: local_images_path= config_yaml["images_path"]

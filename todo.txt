@@ -1,6 +1,5 @@
 TODO:
 -curate images
--max_image_height_pixels not in use?
 -convert config to dictionary or single global or something to make it easier to use?
 -preserve image list progress so that we don't replay the same images
 -refresh image list in background thread, swap between iterations? merge (adding new images only) mid-iteration?
