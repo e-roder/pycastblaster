@@ -2,12 +2,13 @@ TODO:
 -curate images
 -preserve image list progress so that we don't replay the same images
 -refresh image list in background thread, swap between iterations? merge (adding new images only) mid-iteration?
+-get rid of need for symlink: the HTTP server no longer needs access to the images directory since it never serves them directly
+-image processing
+--black dividing line between spliced images?
 -UI/UX: via webserver?
 --graceful exit
 --reload settings (e.g. slideshow length) on the fly
 ---or auto-reload settings by scanning config file?
--image processing
---black dividing line between spliced images?
 -improve lazy evaluation of is_portait to better handle worst-case scenarios
 --treat unknown-layout images like landscape
 --don't do lazy evaluation when looking for next portrait image to splice with, just treat like landscape
