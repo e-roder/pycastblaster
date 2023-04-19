@@ -1,5 +1,5 @@
 TODO:
--curate images
+-curate images 
 -preserve image list progress so that we don't replay the same images
 -refresh image list in background thread, swap between iterations? merge (adding new images only) mid-iteration?
 -get rid of need for symlink: the HTTP server no longer needs access to the images directory since it never serves them directly
