@@ -130,8 +130,11 @@ class ImageServerThread(threading.Thread):
 
         self.caster= caster
         self.image_references= image_references
+        random.shuffle(self.image_references)
         self.temp_image_list_file= temp_image_list_file
         self.temp_image_file_names= temp_image_file_names
+
+        self.previous_image_index= 0
 
     def run(self):
         while True: # Keep alive forever
@@ -139,7 +142,6 @@ class ImageServerThread(threading.Thread):
             self.not_serving.clear()
             self.serve_images()
             self.not_serving.set()
-            random.shuffle(self.image_references)
 
     def start_serving(self):
         self.should_serve.set()
@@ -153,8 +155,9 @@ class ImageServerThread(threading.Thread):
         # when we encounter it so we set this bool to ignore it.
         skip_next_portrait= False
         image_count= len(self.image_references)
+        start_index= max(0, min(image_count - 1, self.previous_image_index - 1))
 
-        for image_index, image_reference in enumerate(self.image_references):
+        for image_index, image_reference in enumerate(self.image_references[start_index:], start_index):
             # Lazily evaluate IsPortrait rather than on startup because it's slow (need to open image file and
             # potentially transpose it)
             if image_reference.image_layout == ImageLayout.Unknown:
@@ -224,6 +227,7 @@ class ImageServerThread(threading.Thread):
             if not self.should_serve.is_set():
                 break
 
+            self.previous_image_index= image_index
             time.sleep(g_config.slideshow_duration_seconds)
 
 class CanCastResult(enum.IntEnum):
