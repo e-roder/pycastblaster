@@ -26,6 +26,7 @@ class Config:
         self.chromecast_friendly_name= "Family Room TV"
         self.slideshow_duration_seconds= 5
         self.interruption_idle_seconds= 10
+        self.image_scanning_frequency_seconds= 10 * 60 # 10 minutes
 
         # Not configurable (no need to expose additional complexity)
         self.local_temp_image_list_file_name= "pycastblaster_temp_files.txt"
@@ -55,6 +56,9 @@ def load_config():
             if "slideshow_duration_seconds" in config_yaml: g_config.slideshow_duration_seconds= float(config_yaml["slideshow_duration_seconds"])
             if "max_image_height_pixels" in config_yaml: g_config.max_image_height_pixels= int(config_yaml["max_image_height_pixels"])
             if "interruption_idle_seconds" in config_yaml: g_config.interruption_idle_seconds= int(config_yaml["interruption_idle_seconds"])
+            # User-facing config option is in minutes for convenience, but using seconds internally since that's what time.sleep() uses.
+            if "image_scanning_frequency_minutes" in config_yaml: g_config.image_scanning_frequency_seconds= \
+                60 * int(config_yaml["image_scanning_frequency_minutes"])
 
 # We must load the config before setting...
 #   -server_url, since it references http_server_port
@@ -130,17 +134,25 @@ class ImageServerThread(threading.Thread):
 
         self.caster= caster
         self.image_references= image_references
+        self.pending_new_image_references= None # 
         random.shuffle(self.image_references)
         self.temp_image_list_file= temp_image_list_file
         self.temp_image_file_names= temp_image_file_names
 
         self.previous_image_index= 0
+        # When we splice one portrait image with the next one in the list, we don't want to display that image
+        # when we encounter it so we remember its name to skip when we encounter it.
+        # It's possible if we merge in new portait images ahead of the skipped portait that we might need to track
+        # more than one portrait image to skip, so make this a set.
+        self.skip_portait_image_names= set()
 
     def run(self):
         while True: # Keep alive forever
             self.should_serve.wait()
             self.not_serving.clear()
-            self.serve_images()
+            while self.should_serve.is_set():
+                self.merge_pending_image_references()
+                self.serve_images()              
             self.not_serving.set()
 
     def start_serving(self):
@@ -149,13 +161,37 @@ class ImageServerThread(threading.Thread):
     def stop_serving_and_wait(self):
         self.should_serve.clear()
         return self.not_serving.wait()
+    
+    def add_image_references(self, new_image_references):
+        # Image Server thread is may be consuming pending_new_image_references, wait until it's done
+        while(self.pending_new_image_references is not None):
+            time.sleep(0.5)
+        self.pending_new_image_references= new_image_references
+
+    def merge_pending_image_references(self):
+        if not self.pending_new_image_references is None:
+            # Merge in the new images so that we don't replay images we've already served.
+            print("Merging in [%d] new images." % (len(self.pending_new_image_references)))
+
+            # First, shuffle the new images with the images that haven't been served yet
+            shuffled_image_references= self.image_references[self.previous_image_index:]
+            shuffled_image_references= shuffled_image_references + self.pending_new_image_references
+            random.shuffle(shuffled_image_references)
+
+            # Then, prepend the images that have already been served
+            merged_image_references= self.image_references[:max(self.previous_image_index - 1, 0)] + shuffled_image_references
+
+            # Finally, swap the merged image list into place
+            self.image_references= merged_image_references
+
+            # Invalidate self.pending_new_image_references once we're done to signal that we're ready to accept
+            # more new images from the Image Scanner.
+            self.pending_new_image_references= None
 
     def serve_images(self):
-        # When we splice one portrait image with the next one in the list, we don't want to display that image
-        # when we encounter it so we set this bool to ignore it.
-        skip_next_portrait= False
         image_count= len(self.image_references)
         start_index= max(0, min(image_count - 1, self.previous_image_index - 1))
+        interrupted= False
 
         for image_index, image_reference in enumerate(self.image_references[start_index:], start_index):
             # Lazily evaluate IsPortrait rather than on startup because it's slow (need to open image file and
@@ -172,9 +208,9 @@ class ImageServerThread(threading.Thread):
                 self.temp_image_file_names.append(temp_image_file_name)
                 # generate a temporary image reference to the processed image
                 image_reference= ImageReference(temp_image_file_name, local_image_file_path_to_url(temp_image_file_name), ImageLayout.Landscape)
-            elif skip_next_portrait:
-                # If this image is a portait, clear skip_next_portait and skip it
-                skip_next_portrait= False
+            elif image_reference.local_image_path in self.skip_portait_image_names:
+                # If this image is a portait we've already displayed then, skip it
+                self.skip_portait_image_names.remove(image_reference.local_image_path)
                 continue
             else: # ImageLayout.Portrait
                 # Find the next portait image in images to splice with
@@ -189,8 +225,9 @@ class ImageServerThread(threading.Thread):
                         # Update list of images so we don't need to evaluate this image again
                         self.image_references[search_image_index]= search_image
 
-                    if search_image.image_layout == ImageLayout.Portrait:
-                        skip_next_portrait= True
+                    if (search_image.image_layout == ImageLayout.Portrait and
+                        not search_image.local_image_path in self.skip_portait_image_names):
+                        self.skip_portait_image_names.add(search_image.local_image_path)
                         # Select a temporary file name for the spliced image (generate a unique ID since chromecast caches images
                         # if we reuse file names)
                         spliced_image_file_name= os.path.join(g_config.local_temp_image_path, str(uuid.uuid4())) + ".jpg"
@@ -220,6 +257,7 @@ class ImageServerThread(threading.Thread):
                 # If we failed to play media, the Chromecast probably disconnected, so stop trying to serve images
                 # before we trigger some exception in the pychromecast library
                 self.should_serve.clear()
+                interrupted= True
                 print("Stopping Image Server thread because we failed to play media (timed out?).")
                 break
 
@@ -230,6 +268,22 @@ class ImageServerThread(threading.Thread):
             self.previous_image_index= image_index
             time.sleep(g_config.slideshow_duration_seconds)
 
+            # There are new pending images to merge with our list, stop serving for a moment.
+            # NOTE: Do this *after* we sleep because this should be pretty quick, so if we didn't sleep then
+            # we'd skip the image(s) we just prepared
+            if self.pending_new_image_references is not None:
+                interrupted= True
+                break
+
+        # If we finished looping over our images without interruption then shuffle them and start at the beginning.
+        # It's not quite trivial to compare previous_image_index against the number of images because we might skip
+        # the last image without incrementing previous_image_index.
+        if not interrupted:
+            print("Image list complete, shuffling and restarting")
+            random.shuffle(self.image_references)
+            self.previous_image_index= 0
+            self.skip_portait_image_names.clear()
+
 class CanCastResult(enum.IntEnum):
     Success= 0
     FailNotConnected= 1
@@ -238,7 +292,7 @@ class CanCastResult(enum.IntEnum):
     FailInUse= 4
 
 class ChromeCastPoller:
-    def __init__(self, chromecast_friendly_name, image_references, temp_image_list_file, temp_image_file_names):
+    def __init__(self, chromecast_friendly_name):
         def add_callback(uuid, _service):
             print("Chromecast added %s (%s)", self.browser.devices[uuid].friendly_name, uuid)
             
@@ -271,14 +325,15 @@ class ChromeCastPoller:
         self.cast_lock= threading.RLock() # making this a reentrant lock so that can_cast() can take the lock, to make sure it's always thread-safe to use
         self.chromecast= None
 
-        # plumbing to image_server_thread
-        self.image_references= image_references
-        self.temp_image_list_file= temp_image_list_file
-        self.temp_image_file_names= temp_image_file_names
+        self.image_serving_thread= None
 
-        self.image_serving_thread= ImageServerThread(self, self.image_references, self.temp_image_list_file, self.temp_image_file_names)
-        self.image_serving_thread.start() # Will block on self.image_serving_thread.should_serve
+    def __del__(self):
+        if self.cast_lock.acquire():
+            if self.chromecast:
+                self.chromecast.quit_app()
+                self.browser.stop_discovery()
 
+    def start(self):
         # Start a separate thread to wait for the Chromecast to be idle rather than blocking this one
         self.wait_for_idle_thread= threading.Thread(target= self.wait_for_idle, daemon= True)
         self.wait_for_idle_thread.start()
@@ -286,12 +341,6 @@ class ChromeCastPoller:
         self.browser.start_discovery()
 
         print("Chrome Cast poller started, looking for '%s'" % self.friendly_name)
-
-    def __del__(self):
-        if self.cast_lock.acquire():
-            if self.chromecast:
-                self.chromecast.quit_app()
-                self.browser.stop_discovery()
 
     def stop_image_server(self):
         self.image_serving_thread.stop_serving_and_wait()
@@ -367,34 +416,80 @@ class ChromeCastPoller:
         
         return success
 
-# class ImageScanningThread(threading.Thread):
-#     def __init__(self):
-#         threading.Thread.__init(self, daemon= True)
-#         self.image_references= [] # ImageReferences
-#         self.daemon= True
+class ImageScanningThread(threading.Thread):
+    def __init__(self, image_server):
+        threading.Thread.__init__(self, daemon= True)
+        self.local_image_paths= set() # Set: local_file_path
+        self.image_server= image_server
+        self.daemon= True
 
-#     def run(self):
-#         # TODO scan for files
-#         pass
+    def run(self):
+        scan_interrupt_seconds= 10
+
+        while(True):
+            scan_interrupt_timestamp_seconds= time.monotonic() + scan_interrupt_seconds
+
+            # Walk local_images_path scanning for supported image files. If we aren't already tracking them in
+            # self.local_image_paths then add it to the list of new images to update the image server with.
+            new_local_image_paths= []
+            if (os.path.exists(g_config.local_images_path)):
+                for dirpath, dirnames, filenames in os.walk(g_config.local_images_path, followlinks=True):
+                    for filename in filenames:
+                        if filename.lower().endswith(image_processing.supported_image_extensions) and not filename.startswith("._"):
+                            image_path= os.path.join(dirpath, filename)
+
+                            # skip temp images and images we've already processed
+                            if (not image_path.startswith(g_config.local_temp_image_path) and
+                            not image_path in self.local_image_paths):
+                                new_local_image_paths.append(image_path)
+                                self.local_image_paths.add(image_path)
+
+                        if scan_interrupt_seconds >= 0:
+                            # Update the image server periodically so that churning through a massive list of images doesn't block the image server
+                            # when starting up.
+                            new_time= time.monotonic()
+                            if new_time >= scan_interrupt_timestamp_seconds:
+                                scan_interrupt_timestamp_seconds= new_time + scan_interrupt_seconds
+                                self.update_image_server_blocking(new_local_image_paths)
+                                # Make sure to clear out the list of new images so they don't get added again.
+                                new_local_image_paths.clear()
+            else:
+                print("ERROR: Image Path '%s' does not exist" % (g_config.local_images_path))
+            
+            # Once we have an initial set of images, no need to update the image server in the middle of scanning images anymore, since it
+            # probably slows down the scanning process.
+            if len(self.local_image_paths) > 0:
+                scan_interrupt_seconds= -1
+
+            if (len(new_local_image_paths) > 0):
+                self.update_image_server_blocking(new_local_image_paths)
+
+            time.sleep(g_config.image_scanning_frequency_seconds)
+
+    def update_image_server_blocking(self, new_local_image_paths):
+        image_references= [ImageReference(image_path, local_image_file_path_to_url(image_path), ImageLayout.Unknown)
+            for image_path in new_local_image_paths]
+
+        self.image_server.add_image_references(image_references)
+
+    def get_images_from_local_path(local_image_path):
+        images= []
+        if (os.path.exists(local_image_path)):
+            for dirpath, dirnames, filenames in os.walk(local_image_path, followlinks=True):
+                images= images + [
+                    os.path.join(dirpath, filename)
+                    for filename in filenames
+                        if filename.lower().endswith(image_processing.supported_image_extensions) and not filename.startswith("._")]
+        return images
 
 def main():
-    # compile list of images from image file share
-    image_references= [] # ImageReferences
-
     random.seed()
 
     print("Serving local directory '%s' and spinning up HTTP server '%s'" % (
         g_config.local_images_path,
         server_url))
     
-    # Build images as a tuple of (URL path, is_portait). is_portait lets us quickly find and splice portrait
-    # images together into a temporary image to serve
-    # -Skip images that are in local_spliced_image_path (maybe left-over from a previous run)        
-    image_references= [
-        ImageReference(image_path, local_image_file_path_to_url(image_path), ImageLayout.Unknown)
-        for image_path in image_processing.get_images_from_local_path(g_config.local_images_path)
-            if not image_path.startswith(g_config.local_temp_image_path)]
-    # Spin up a separate thread to run a web server. The server exposes images in local_images_path to the Chromecast
+   # Spin up a separate thread to run a web server. The server exposes images in local_images_path to the Chromecast
     threading.Thread(target= web_server_thread).start()
 
     # Make sure the spliced image path exists since it's for files generated by the application, don't expect
@@ -419,15 +514,29 @@ def main():
     else:
         temp_image_list_file= open(g_config.local_temp_image_list_file_path, "w+")
 
-    random.shuffle(image_references)
-
     temp_image_file_names= []
-    caster= ChromeCastPoller(g_config.chromecast_friendly_name, image_references, temp_image_list_file, temp_image_file_names)
+    
+    # Three pieces:
+    # 1. Chromecast Poller: Waits for the Chromecast to be available
+    # 2. Image Server: Serves images to Chromecast when told by the Chromecast Poller.
+    # 3. Image Scanner: Periodically scans for new images and merges them into the list of the Image Server
+    chromecast_poller= ChromeCastPoller(g_config.chromecast_friendly_name)
+    image_serving_thread= ImageServerThread(chromecast_poller, [], temp_image_list_file, temp_image_file_names)
+    image_scanning_thread= ImageScanningThread(image_serving_thread)
+
+    chromecast_poller.image_serving_thread= image_serving_thread
+
+    # Start the image server first which will block until the Chromecast poller tells it to serve
+    image_serving_thread.start() # Will block on image_serving_thread.should_serve
+    # Then start the image scanner to begin populating the image server
+    image_scanning_thread.start()
+    # Finally start the chromecast poller to look for chromecasts, now that the server is ready to serve (and will have some images soon)
+    chromecast_poller.start()
 
     # Quit gracefully (stops casting session)
     exit= False # nothing sets this now but we can poke it in the debugger
 
-    # Just blocking to keep the caster alive
+    # Just blocking to keep program alive
     while(not exit):
         time.sleep(1.0)
 

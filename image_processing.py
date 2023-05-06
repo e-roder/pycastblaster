@@ -107,17 +107,7 @@ def process_image_file(input_image_file_name, output_image_file_name):
 		new_extension= output_extension if output_extension.lower() in supported_image_extensions else ".jpeg"
 		image.save(output_root + new_extension) 
 
-		return output_root + new_extension   
-
-def get_images_from_local_path(local_image_path):
-	images= []
-	if (os.path.exists(local_image_path)):
-		for dirpath, dirnames, filenames in os.walk(local_image_path, followlinks=True):
-			images= images + [
-				os.path.join(dirpath, filename)
-				for filename in filenames
-					if filename.lower().endswith(supported_image_extensions) and not filename.startswith("._")]
-	return images
+		return output_root + new_extension
 
 def image_is_portait(image_file_name):
 	with PIL.Image.open(image_file_name, "r") as image:
@@ -148,18 +138,3 @@ def splice_images(image_file_name_1, image_file_name_2, spliced_image_file_name)
 			# paste() operates in-place, unlike most PIL functions so no need to assign to image_1
 			image_1.paste(image_2, (image_2.width, 0))
 			image_1.save(spliced_image_file_name)
-
-def process_images():
-	images= get_images_from_local_path(image_processing_directory)
-	image_count= len(images)
-	for image_index, image_file_name in enumerate(images):
-		process_image(image_file_name, image_file_name)
-		image_number= image_index + 1
-		if image_number % 5 == 0:
-			print("%d / %d images processes: (%.2f%%)" %
-				(image_number,
-				image_count,
-				image_number / image_count * 100))
-	print("Finished processing %d images" % image_count)
-
-#process_images()

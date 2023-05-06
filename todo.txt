@@ -1,7 +1,8 @@
 TODO:
 -curate images 
--refresh image list in background thread, swap between iterations? merge (adding new images only) mid-iteration?
+-increase grace period? test with amazon video
 -get rid of need for symlink: the HTTP server no longer needs access to the images directory since it never serves them directly
+--Is this true for portraits when there is no portrait to splice with?
 -image processing
 --black dividing line between spliced images?
 -UI/UX: via webserver?
