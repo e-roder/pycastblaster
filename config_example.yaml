@@ -4,3 +4,4 @@ http_server_port: 8001
 chromecast_name: "Family Room TV"
 slideshow_duration_seconds: 15
 interruption_idle_seconds: 10 # Grace period to wait for another Chromecast app to start up when we detect that we're interrupted (otherwise we may just interrupt them again).
+image_scanning_frequency_minutes: 10 # Time to wait before rescanning for new images

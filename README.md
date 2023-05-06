@@ -25,6 +25,7 @@ The program can be configured with a YAML file, "config.yaml" by default. You ca
 | slideshow_duration_seconds | How many seconds before advancing to the next image. | 15 |
 | max_image_height_pixels | Display resolution of your Chromecast, usually 720 or 1080. | 720 |
 | interruption_idle_seconds | Grace period to wait for another Chromecast app to start up when we detect that we're interrupted (otherwise we may just interrupt them again). | 10 |
+| image_scanning_frequency_minutes | Time (in MINUTES) to wait before rescanning for new images. | 10 |
 
 ## Casting to multiple Chromecasts
 This program only supports casting to a single device at a time, for simplicity. To cast images to multiple devices (though not synchronized), you can run multiple instances of this program with different config files and options. E.g.:
