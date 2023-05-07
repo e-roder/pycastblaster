@@ -19,7 +19,7 @@ The program can be configured with a YAML file, "config.yaml" by default. You ca
 | Name | Description | Default Value |
 | ---- | ----------- | ------------- |
 | images_path | Local or network mapped directory to select images from. Image order is randomized. | *./images* |
-| temp_directory | Name of directory for storing temporary image files. This directory will be created inside 'images_path' (no need to create it manually). | *temp* |
+| temp_directory | Name of directory for storing temporary image files. This directory will be created relative to the current working directory. | *temp* |
 | http_server_port | Port to serve images from (this is how they are accessed by the Chromecast).  | 8000 |
 | chromecast_name | Name of the Chromecast, configured in the Google Home app. https://support.google.com/googlenest/answer/7550874?hl=en | "Family Room TV" |
 | slideshow_duration_seconds | How many seconds before advancing to the next image. | 15 |
@@ -37,7 +37,7 @@ You'll want to make sure the following options are unique for each device:
 3. chromecast_name
 
 ## Refresh Behavior
-Currently there's no support for refreshing the list of images or adjusting the slideshow time while running, but it's on the TODO list.
+New images are automatically detected and shuffled into the remainder of the playlist. Use the config option `image_scanning_frequency_minutes` to control how often this happens.
 
 ## Using with Docker
 Included are two example files for use with Docker: dockerfile and docker-compose.yaml.
