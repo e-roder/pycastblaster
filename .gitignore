@@ -134,8 +134,9 @@ dmypy.json
 # Images
 /images
 
-# Cache files
+# Temp Files
 image_cache.txt
+/temp
 
 # VS Code files
 /.vscode

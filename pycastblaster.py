@@ -18,7 +18,7 @@ class Config:
     def __init__(self) -> None:
         ##### Configurable constants (via config.yaml)
         self.local_images_path= "images/"
-        self.local_temp_image_path= self.local_images_path + "temp/" # must be child of local_images_path in order to serve to Chromecast
+        self.local_temp_path= "temp/"
         self.http_server_port= 8000
         # Resize generated images down to this scale, so that they can be loaded faster by chromecast.
         # Adjust to max support resolution of your chromecast.
@@ -30,7 +30,7 @@ class Config:
 
         # Not configurable (no need to expose additional complexity)
         self.local_temp_image_list_file_name= "pycastblaster_temp_files.txt"
-        self.local_temp_image_list_file_path= os.path.join(self.local_temp_image_path, self.local_temp_image_list_file_name)
+        self.local_temp_image_list_file_path= os.path.join(self.local_temp_path, self.local_temp_image_list_file_name)
 
 g_config= Config()
 
@@ -48,9 +48,9 @@ def load_config():
             if "images_path" in config_yaml: g_config.local_images_path= config_yaml["images_path"]
             # local_temp_image_path must be child of local_images_path in order to serve to Chromecast
             if "temp_directory" in config_yaml:
-                g_config.local_temp_image_path= os.path.join(g_config.local_images_path, config_yaml["temp_directory"])
+                g_config.local_temp_path= config_yaml["temp_directory"]
                 # have the default local_temp_image_list_file_path be relative to local_temp_image_path
-                g_config.local_temp_image_list_file_path= os.path.join(g_config.local_temp_image_path, g_config.local_temp_image_list_file_name)
+                g_config.local_temp_image_list_file_path= os.path.join(g_config.local_temp_path, g_config.local_temp_image_list_file_name)
             if "http_server_port" in config_yaml: g_config.http_server_port= int(config_yaml["http_server_port"])
             if "chromecast_name" in config_yaml: g_config.chromecast_friendly_name= config_yaml["chromecast_name"]
             if "slideshow_duration_seconds" in config_yaml: g_config.slideshow_duration_seconds= float(config_yaml["slideshow_duration_seconds"])
@@ -104,19 +104,15 @@ class ImageReference:
 
 # Build the URL path:
 # 1. include the root server URL
-# 2. Remove the root of the local_images_path because HTTPHandler uses that as the root directory, so it's
+# 2. Remove the root of the local_temp_path because HTTPHandler uses that as the root directory, so it's
 # not included.
 def local_image_file_path_to_url(local_image_file_path):
-    return server_url + "/" + os.path.relpath(local_image_file_path, g_config.local_images_path)
-
-# Convert a URL path (for a URL served by *our* HTTP server) back to a local path
-def url_to_local_image_file_path(url):
-    return g_config.local_images_path + url[len(server_url + "/"):]
+    return server_url + "/" + os.path.relpath(local_image_file_path, g_config.local_temp_path)
 
 # Custom class in order to serve up a specific subdirectory
 class HTTPHandler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, directory=g_config.local_images_path, **kwargs)
+        super().__init__(*args, directory=g_config.local_temp_path, **kwargs)
 
 def web_server_thread():
     with http.server.ThreadingHTTPServer(("", g_config.http_server_port), HTTPHandler) as http_server:
@@ -200,19 +196,13 @@ class ImageServerThread(threading.Thread):
                 image_reference.image_layout= ImageLayout.Portrait if image_processing.image_is_portait(image_reference.local_image_path) else ImageLayout.Landscape
                 self.image_references[image_index]= image_reference # Update list of images so we don't need to evaluate this image again
 
-            if image_reference.image_layout == ImageLayout.Landscape:
-                # Process image on the fly, generate a temporary file to store the processed image
-                temp_image_file_name= os.path.join(g_config.local_temp_image_path, str(uuid.uuid4())) + ".jpg"
-                # Update temp_image_file_name in case process_image renamed it
-                temp_image_file_name= image_processing.process_image_file(image_reference.local_image_path, temp_image_file_name)
-                self.temp_image_file_names.append(temp_image_file_name)
-                # generate a temporary image reference to the processed image
-                image_reference= ImageReference(temp_image_file_name, local_image_file_path_to_url(temp_image_file_name), ImageLayout.Landscape)
-            elif image_reference.local_image_path in self.skip_portait_image_names:
+            processed_image= False
+
+            if image_reference.local_image_path in self.skip_portait_image_names:
                 # If this image is a portait we've already displayed then, skip it
                 self.skip_portait_image_names.remove(image_reference.local_image_path)
                 continue
-            else: # ImageLayout.Portrait
+            elif image_reference.image_layout == ImageLayout.Portrait:
                 # Find the next portait image in images to splice with
                 # If there is one then set skip_next_portait, splice it with this one, and replace image
                 for search_image_index in range(image_index + 1, image_count):
@@ -230,14 +220,25 @@ class ImageServerThread(threading.Thread):
                         self.skip_portait_image_names.add(search_image.local_image_path)
                         # Select a temporary file name for the spliced image (generate a unique ID since chromecast caches images
                         # if we reuse file names)
-                        spliced_image_file_name= os.path.join(g_config.local_temp_image_path, str(uuid.uuid4())) + ".jpg"
+                        spliced_image_file_name= os.path.join(g_config.local_temp_path, str(uuid.uuid4())) + ".jpg"
                         self.temp_image_file_names.append(spliced_image_file_name)
                         print("Splicing '%s' + '%s' into '%s'" % (image_reference.local_image_path, search_image.local_image_path, spliced_image_file_name))
                         # create temporary spliced image
                         image_processing.splice_images(image_reference.local_image_path, search_image.local_image_path, spliced_image_file_name)
                         # generate a temporary image reference to the spliced image that now has a landscape layout
                         image_reference= ImageReference(spliced_image_file_name, local_image_file_path_to_url(spliced_image_file_name), ImageLayout.Landscape)
+                        processed_image= True
                         break
+
+            if not processed_image:
+                # Process image on the fly, generate a temporary file to store the processed image
+                temp_image_file_name= os.path.join(g_config.local_temp_path, str(uuid.uuid4())) + ".jpg"
+                # Update temp_image_file_name in case process_image renamed it
+                temp_image_file_name= image_processing.process_image_file(image_reference.local_image_path, temp_image_file_name)
+                self.temp_image_file_names.append(temp_image_file_name)
+                # generate a temporary image reference to the processed image
+                image_reference= ImageReference(temp_image_file_name, local_image_file_path_to_url(temp_image_file_name), ImageLayout.Landscape)
+                processed_image= True
 
             # clean up temporary spliced images, leave a few around in-case they're still being served
             if len(self.temp_image_file_names) > 2:
@@ -439,7 +440,7 @@ class ImageScanningThread(threading.Thread):
                             image_path= os.path.join(dirpath, filename)
 
                             # skip temp images and images we've already processed
-                            if (not image_path.startswith(g_config.local_temp_image_path) and
+                            if (not image_path.startswith(g_config.local_temp_path) and
                             not image_path in self.local_image_paths):
                                 new_local_image_paths.append(image_path)
                                 self.local_image_paths.add(image_path)
@@ -488,14 +489,14 @@ def main():
     print("Serving local directory '%s' and spinning up HTTP server '%s'" % (
         g_config.local_images_path,
         server_url))
-    
-   # Spin up a separate thread to run a web server. The server exposes images in local_images_path to the Chromecast
-    threading.Thread(target= web_server_thread).start()
 
     # Make sure the spliced image path exists since it's for files generated by the application, don't expect
     # users to create it
-    if not os.path.exists(g_config.local_temp_image_path):
-        os.makedirs(g_config.local_temp_image_path)
+    if not os.path.exists(g_config.local_temp_path):
+        os.makedirs(g_config.local_temp_path)
+
+   # Spin up a separate thread to run a web server. The server exposes images in local_images_path to the Chromecast
+    threading.Thread(target= web_server_thread).start()
 
     # delete any temp files we created from a previous run (by tracking a list of files)
     # if the list file doesn't exist yet then create it now to track temp files created this run
@@ -504,7 +505,7 @@ def main():
         for line in temp_image_list_file:
             # make sure to strip out any file path from file names so that any file we delete must be contained
             # in the directory we expect
-            file_name_to_delete= os.path.join(g_config.local_temp_image_path, os.path.basename(line.strip()))
+            file_name_to_delete= os.path.join(g_config.local_temp_path, os.path.basename(line.strip()))
             if os.path.exists(file_name_to_delete):
                 print("Purging temporary image '%s' from '%s'" % (file_name_to_delete, g_config.local_temp_image_list_file_path))
                 os.remove(file_name_to_delete)
