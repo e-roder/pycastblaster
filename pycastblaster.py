@@ -25,7 +25,7 @@ class Config:
         self.max_image_height_pixels= 720
         self.chromecast_friendly_name= "Family Room TV"
         self.slideshow_duration_seconds= 5
-        self.interruption_idle_seconds= 10
+        self.interruption_idle_seconds= 20
         self.image_scanning_frequency_seconds= 10 * 60 # 10 minutes
 
         # Not configurable (no need to expose additional complexity)

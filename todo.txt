@@ -1,6 +1,5 @@
 TODO:
 -curate images 
--increase grace period? test with amazon video
 -UI/UX: via webserver?
 --graceful exit
 --reload settings (e.g. slideshow length) on the fly

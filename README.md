@@ -24,7 +24,7 @@ The program can be configured with a YAML file, "config.yaml" by default. You ca
 | chromecast_name | Name of the Chromecast, configured in the Google Home app. https://support.google.com/googlenest/answer/7550874?hl=en | "Family Room TV" |
 | slideshow_duration_seconds | How many seconds before advancing to the next image. | 15 |
 | max_image_height_pixels | Display resolution of your Chromecast, usually 720 or 1080. | 720 |
-| interruption_idle_seconds | Grace period to wait for another Chromecast app to start up when we detect that we're interrupted (otherwise we may just interrupt them again). | 10 |
+| interruption_idle_seconds | Grace period to wait for another Chromecast app to start up when we detect that we're interrupted (otherwise we may just interrupt them again). | 20 |
 | image_scanning_frequency_minutes | Time (in MINUTES) to wait before rescanning for new images. | 10 |
 
 ## Casting to multiple Chromecasts
