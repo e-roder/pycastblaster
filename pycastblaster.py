@@ -47,8 +47,8 @@ def load_config():
 
             if "images_path" in config_yaml: g_config.local_images_path= config_yaml["images_path"]
             # local_temp_image_path must be child of local_images_path in order to serve to Chromecast
-            if "temp_directory" in config_yaml:
-                g_config.local_temp_path= config_yaml["temp_directory"]
+            if "temp_path" in config_yaml:
+                g_config.local_temp_path= config_yaml["temp_path"]
                 # have the default local_temp_image_list_file_path be relative to local_temp_image_path
                 g_config.local_temp_image_list_file_path= os.path.join(g_config.local_temp_path, g_config.local_temp_image_list_file_name)
             if "http_server_port" in config_yaml: g_config.http_server_port= int(config_yaml["http_server_port"])

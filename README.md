@@ -18,8 +18,8 @@ The program can be configured with a YAML file, "config.yaml" by default. You ca
 
 | Name | Description | Default Value |
 | ---- | ----------- | ------------- |
-| images_path | Local or network mapped directory to select images from. Image order is randomized. | *./images* |
-| temp_directory | Name of directory for storing temporary image files. This directory will be created relative to the current working directory. | *temp* |
+| images_path | Local or network mapped directory to select images from. May be relative or absolute. Image order is randomized. | *images* |
+| temp_path | Path for storing temporary image files (created automatically). May be relative or absolute. | *temp* |
 | http_server_port | Port to serve images from (this is how they are accessed by the Chromecast).  | 8000 |
 | chromecast_name | Name of the Chromecast, configured in the Google Home app. https://support.google.com/googlenest/answer/7550874?hl=en | "Family Room TV" |
 | slideshow_duration_seconds | How many seconds before advancing to the next image. | 15 |
@@ -32,7 +32,7 @@ This program only supports casting to a single device at a time, for simplicity.
 `python3 pycastblaster config1.yaml` and `python3 pycastblaster config2.yaml`. 
 
 You'll want to make sure the following options are unique for each device:
-1. temp_directory (There's a text file that manages temporary images, and multiple instances would fight over the contents of that file.)
+1. temp_path (There's a text file that manages temporary images, and multiple instances would fight over the contents of that file.)
 2. http_server_port
 3. chromecast_name
 
