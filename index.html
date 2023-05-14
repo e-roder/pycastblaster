@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<title>Pycastblaster!</title>
+<body>
+    Pycastblaster
+    <br/>
+    <br/>
+    <button id="exit-btn">Exit</button>
+</body>
+</html>
+
+<script>
+  async function post_command(name, parameters)
+  {
+    try {
+        const body_object= { "name" : name, "parameters": parameters};
+        const response = await fetch('command', {
+            method: 'post',
+            headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(body_object)
+        });
+      console.log('Completed!', response);
+
+      return response;
+    } catch(err) {
+      console.error(`Error: ${err}`);
+    }
+
+    return null;
+  }
+  
+  const exit_button = document.getElementById('exit-btn');
+  exit_button.addEventListener('click', async _ => {
+    response= post_command("exit", "")
+  });
+</script>

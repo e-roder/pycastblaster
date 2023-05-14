@@ -27,6 +27,10 @@ The program can be configured with a YAML file, "config.yaml" by default. You ca
 | interruption_idle_seconds | Grace period to wait for another Chromecast app to start up when we detect that we're interrupted (otherwise we may just interrupt them again). | 20 |
 | image_scanning_frequency_minutes | Time (in MINUTES) to wait before rescanning for new images. | 10 |
 
+## Controlling via webbrowser
+You can navigate to <your IP address>:<http_server_port> to access a website and control Pycastblaster. Current features available via the website:
+* Exit: Stop Pycastblaster.
+
 ## Casting to multiple Chromecasts
 This program only supports casting to a single device at a time, for simplicity. To cast images to multiple devices (though not synchronized), you can run multiple instances of this program with different config files and options. E.g.:
 `python3 pycastblaster config1.yaml` and `python3 pycastblaster config2.yaml`. 
@@ -36,7 +40,7 @@ You'll want to make sure the following options are unique for each device:
 2. http_server_port
 3. chromecast_name
 
-## Refresh Behavior
+## Refresh Image List
 New images are automatically detected and shuffled into the remainder of the playlist. Use the config option `image_scanning_frequency_minutes` to control how often this happens.
 
 ## Using with Docker

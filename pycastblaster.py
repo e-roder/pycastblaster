@@ -3,9 +3,11 @@ import pychromecast
 import pychromecast.discovery
 import random
 import os
+import json
 import http.server
 import socketserver
 import threading
+import shutil
 import socket
 import image_processing
 import uuid
@@ -33,6 +35,7 @@ class Config:
         self.local_temp_image_list_file_path= os.path.join(self.local_temp_path, self.local_temp_image_list_file_name)
 
 g_config= Config()
+g_exit= threading.Event()
 
 def load_config():
     config_file_path= "config.yaml" if (len(sys.argv) == 1) else sys.argv[1]
@@ -114,6 +117,37 @@ class HTTPHandler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=g_config.local_temp_path, **kwargs)
 
+    def _set_response(self, status):
+        self.send_response(status)
+        self.send_header('Content-type', 'text/html')
+        self.end_headers()
+
+    def do_POST(self):
+        content_length = int(self.headers['Content-Length']) # <--- Gets the size of data
+        post_data = self.rfile.read(content_length) # <--- Gets the data itself
+        post_data_string= post_data.decode('utf-8')
+        # print("POST request,\nPath: %s\nHeaders:\n%s\n\nBody:\n%s\n" % (str(self.path), str(self.headers), post_data_string))
+        status= http.HTTPStatus.OK
+        message= "POST request for {}".format(self.path)
+
+        if (self.path == "/command"):
+            post_data_json= json.loads(post_data_string)
+            command_name= post_data_json["name"]
+            command_parameters= post_data_json["parameters"]
+
+            if (command_name == "exit"):
+                print("Received 'exit' command, quitting.")
+                global g_exit
+                g_exit.set()
+            else:
+                message= "Received unknown command '%s'" % (str(command_name))
+                print(message)
+                status= http.HTTPStatus.BAD_REQUEST
+
+        self._set_response(status)
+        self.wfile.write(message.encode('utf-8'))
+
+
 def web_server_thread():
     with http.server.ThreadingHTTPServer(("", g_config.http_server_port), HTTPHandler) as http_server:
         print("serving at port", g_config.http_server_port)
@@ -143,10 +177,10 @@ class ImageServerThread(threading.Thread):
         self.skip_portait_image_names= set()
 
     def run(self):
-        while True: # Keep alive forever
+        while not g_exit.is_set(): # Keep alive forever
             self.should_serve.wait()
             self.not_serving.clear()
-            while self.should_serve.is_set():
+            while self.should_serve.is_set() and not g_exit.is_set():
                 self.merge_pending_image_references()
                 self.serve_images()              
             self.not_serving.set()
@@ -267,7 +301,12 @@ class ImageServerThread(threading.Thread):
                 break
 
             self.previous_image_index= image_index
-            time.sleep(g_config.slideshow_duration_seconds)
+
+            # This should be redundant with the above, but avoid any race conditions where the ChromecastPoller resets
+            # should_serve by explicitly checking g_exit as well.
+            global g_exit
+            if g_exit.wait(g_config.slideshow_duration_seconds):
+                break
 
             # There are new pending images to merge with our list, stop serving for a moment.
             # NOTE: Do this *after* we sleep because this should be pretty quick, so if we didn't sleep then
@@ -329,10 +368,7 @@ class ChromeCastPoller:
         self.image_serving_thread= None
 
     def __del__(self):
-        if self.cast_lock.acquire():
-            if self.chromecast:
-                self.chromecast.quit_app()
-                self.browser.stop_discovery()
+        self.stop()
 
     def start(self):
         # Start a separate thread to wait for the Chromecast to be idle rather than blocking this one
@@ -342,6 +378,17 @@ class ChromeCastPoller:
         self.browser.start_discovery()
 
         print("Chrome Cast poller started, looking for '%s'" % self.friendly_name)
+
+    def stop(self):
+        if self.cast_lock.acquire():
+            if self.chromecast:
+                self.chromecast.quit_app()
+            self.cast_lock.release()
+        
+        # Discovery and the browser are distinct from the Chromecast. Additionally, we can create a deadlock here
+        # where we have self.cast_lock and are blocked on stop_discovery() waiting for the zeroconf thread to terminate,
+        # while the zeroconf thread has triggered our remove_callback() and is waiting on self.cast_lock
+        self.browser.stop_discovery()
 
     def stop_image_server(self):
         self.image_serving_thread.stop_serving_and_wait()
@@ -495,8 +542,11 @@ def main():
     if not os.path.exists(g_config.local_temp_path):
         os.makedirs(g_config.local_temp_path)
 
+    # Copy HTML index to temp path
+    shutil.copy("index.html", g_config.local_temp_path)
+
    # Spin up a separate thread to run a web server. The server exposes images in local_images_path to the Chromecast
-    threading.Thread(target= web_server_thread).start()
+    threading.Thread(target= web_server_thread, daemon=True).start()
 
     # delete any temp files we created from a previous run (by tracking a list of files)
     # if the list file doesn't exist yet then create it now to track temp files created this run
@@ -535,12 +585,18 @@ def main():
     chromecast_poller.start()
 
     # Quit gracefully (stops casting session)
-    exit= False # nothing sets this now but we can poke it in the debugger
+    global g_exit
 
     # Just blocking to keep program alive
-    while(not exit):
-        time.sleep(1.0)
+    g_exit.wait()
+
+    # Notify and wait for the image serving thread specifically, since it is using temp_image_list_file, before closing the file.
+    image_serving_thread.should_serve.clear()
+    image_serving_thread.not_serving.wait()
 
     temp_image_list_file.close()
+
+    # Stop the Chromecast Poller (disconnect from the Chromecast) after the image serving thread is done serving
+    chromecast_poller.stop()
 
 main()
