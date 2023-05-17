@@ -5,6 +5,9 @@
     Pycastblaster
     <br/>
     <br/>
+    <button id="pause-btn">Pause</button>
+    <br/>
+    <br/>
     <button id="exit-btn">Exit</button>
 </body>
 </html>
@@ -33,7 +36,7 @@
   }
   
   const exit_button = document.getElementById('exit-btn');
-  exit_button.addEventListener('click', async _ => {
-    response= post_command("exit", "")
-  });
+  exit_button.addEventListener('click', async _ => { response= post_command("exit", "") });
+  const pause_button = document.getElementById('pause-btn');
+  pause_button.addEventListener('click', async _ => { response= post_command("pause", "") });
 </script>

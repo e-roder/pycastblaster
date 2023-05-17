@@ -1,7 +1,6 @@
 TODO:
 -curate images
 -UI/UX: via webserver?
---pause slideshow
 --reload settings (e.g. slideshow length) on the fly
 ---or auto-reload settings by scanning config file?
 --inspection/state

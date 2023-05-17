@@ -34,8 +34,13 @@ class Config:
         self.local_temp_image_list_file_name= "pycastblaster_temp_files.txt"
         self.local_temp_image_list_file_path= os.path.join(self.local_temp_path, self.local_temp_image_list_file_name)
 
+class Globals:
+    def __init__(self) -> None:
+        self.exit_event= threading.Event() # Quit gracefully (stops casting session)
+        self.paused= False
+
 g_config= Config()
-g_exit= threading.Event()
+g_globals= Globals()
 
 def load_config():
     config_file_path= "config.yaml" if (len(sys.argv) == 1) else sys.argv[1]
@@ -123,6 +128,8 @@ class HTTPHandler(http.server.SimpleHTTPRequestHandler):
         self.end_headers()
 
     def do_POST(self):
+        global g_globals
+
         content_length = int(self.headers['Content-Length']) # <--- Gets the size of data
         post_data = self.rfile.read(content_length) # <--- Gets the data itself
         post_data_string= post_data.decode('utf-8')
@@ -137,8 +144,10 @@ class HTTPHandler(http.server.SimpleHTTPRequestHandler):
 
             if (command_name == "exit"):
                 print("Received 'exit' command, quitting.")
-                global g_exit
-                g_exit.set()
+                g_globals.exit_event.set()
+            elif (command_name == "pause"):
+                g_globals.paused= not g_globals.paused
+                print("Received 'pause' command, toggling pause '%s'." % ("On" if g_globals.paused else "Off"))
             else:
                 message= "Received unknown command '%s'" % (str(command_name))
                 print(message)
@@ -177,10 +186,10 @@ class ImageServerThread(threading.Thread):
         self.skip_portait_image_names= set()
 
     def run(self):
-        while not g_exit.is_set(): # Keep alive forever
+        while not g_globals.exit_event.is_set(): # Keep alive forever
             self.should_serve.wait()
             self.not_serving.clear()
-            while self.should_serve.is_set() and not g_exit.is_set():
+            while self.should_serve.is_set() and not g_globals.exit_event.is_set():
                 self.merge_pending_image_references()
                 self.serve_images()              
             self.not_serving.set()
@@ -296,24 +305,37 @@ class ImageServerThread(threading.Thread):
                 print("Stopping Image Server thread because we failed to play media (timed out?).")
                 break
 
-            # The casting thread signaled that we should stop, e.g. the Chromecast was removed (turned off?)
-            if not self.should_serve.is_set():
+            sleep_time_remaining= g_config.slideshow_duration_seconds            
+            while (sleep_time_remaining > 0.0):
+                # The casting thread signaled that we should stop, e.g. the Chromecast was removed (turned off?)
+                if not self.should_serve.is_set():
+                    interrupted= True # This will cause us to break out of the image loop
+                    break
+
+                # This should be redundant with the above, but avoid any race conditions where the ChromecastPoller resets
+                # should_serve by explicitly checking g_globals.exit_event as well.
+                if g_globals.exit_event.is_set():
+                    interrupted= True # This will cause us to break out of the image loop
+                    break
+
+                # There are new pending images to merge with our list, stop serving for a moment.
+                # NOTE: Do this *after* we sleep because this should be pretty quick, so if we didn't sleep then
+                # we'd skip the image(s) we just prepared
+                if self.pending_new_image_references is not None:
+                    interrupted= True # This will cause us to break out of the image loop
+                    break
+
+                sleep_duration= min(sleep_time_remaining, 1.0) # Sleep in one second increments
+
+                if not g_globals.paused:
+                    sleep_time_remaining= sleep_time_remaining - sleep_duration
+
+                time.sleep(sleep_duration)
+
+            if interrupted:
                 break
 
             self.previous_image_index= image_index
-
-            # This should be redundant with the above, but avoid any race conditions where the ChromecastPoller resets
-            # should_serve by explicitly checking g_exit as well.
-            global g_exit
-            if g_exit.wait(g_config.slideshow_duration_seconds):
-                break
-
-            # There are new pending images to merge with our list, stop serving for a moment.
-            # NOTE: Do this *after* we sleep because this should be pretty quick, so if we didn't sleep then
-            # we'd skip the image(s) we just prepared
-            if self.pending_new_image_references is not None:
-                interrupted= True
-                break
 
         # If we finished looping over our images without interruption then shuffle them and start at the beginning.
         # It's not quite trivial to compare previous_image_index against the number of images because we might skip
@@ -584,11 +606,8 @@ def main():
     # Finally start the chromecast poller to look for chromecasts, now that the server is ready to serve (and will have some images soon)
     chromecast_poller.start()
 
-    # Quit gracefully (stops casting session)
-    global g_exit
-
     # Just blocking to keep program alive
-    g_exit.wait()
+    g_globals.exit_event.wait()
 
     # Notify and wait for the image serving thread specifically, since it is using temp_image_list_file, before closing the file.
     image_serving_thread.should_serve.clear()

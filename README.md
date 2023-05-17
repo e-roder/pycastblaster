@@ -29,6 +29,7 @@ The program can be configured with a YAML file, "config.yaml" by default. You ca
 
 ## Controlling via webbrowser
 You can navigate to <your IP address>:<http_server_port> to access a website and control Pycastblaster. Current features available via the website:
+* Pause: Pause the slideshow on the current image (pauses slideshow timer). Click again to resume.
 * Exit: Stop Pycastblaster.
 
 ## Casting to multiple Chromecasts
