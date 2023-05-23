@@ -30,7 +30,9 @@ The program can be configured with a YAML file, "config.yaml" by default. You ca
 ## Controlling via webbrowser
 You can navigate to <your IP address>:<http_server_port> to access a website and control Pycastblaster. Current features available via the website:
 * Pause: Pause the slideshow on the current image (pauses slideshow timer). Click again to resume.
-* Exit: Stop Pycastblaster.
+* Update Slideshow Duration: Update the "slideshow_duration_seconds" config value. This change is applied immediately and the associated config file is updated as well.
+* Reload Settings: Reload ALL settings, effectively stopping and restarting the program.
+* Exit: Stop Pycastblaster gracefully.
 
 ## Casting to multiple Chromecasts
 This program only supports casting to a single device at a time, for simplicity. To cast images to multiple devices (though not synchronized), you can run multiple instances of this program with different config files and options. E.g.:

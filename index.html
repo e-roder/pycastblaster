@@ -10,6 +10,9 @@
     Slideshow Duration Seconds: <input id="duration-input"></input> <button id="duration-update-btn">Update</button>
     <br/>
     <br/>
+    <button id="reload-btn">Reload Settings</button>
+    <br/>
+    <br/>
     <button id="exit-btn">Exit</button>
 </body>
 </html>
@@ -88,6 +91,8 @@
   exit_button.addEventListener('click', async _ => { response= post_command("exit", "") });
   const pause_button = document.getElementById('pause-btn');
   pause_button.addEventListener('click', async _ => { response= post_command("pause", "").then(get_state()); });
+  const reload_button = document.getElementById('reload-btn');
+  reload_button.addEventListener('click', async _ => { response= post_command("reload", "").then(get_state()); });
   const duration_input = document.getElementById('duration-input');
   const duration_update_button = document.getElementById('duration-update-btn');
   duration_update_button.addEventListener('click', async _ => { response= post_command("duration_update", duration_input.value).then(get_state());});

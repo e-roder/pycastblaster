@@ -34,14 +34,17 @@ class Config:
         # Not configurable (no need to expose additional complexity)
         self.local_temp_image_list_file_name= "pycastblaster_temp_files.txt"
         self.local_temp_image_list_file_path= os.path.join(self.local_temp_path, self.local_temp_image_list_file_name)
+        self.server_url= "http://" + get_ip() + ":" + str(self.http_server_port)
+        image_processing.set_max_image_height(self.max_image_height_pixels)
 
 class Globals:
     def __init__(self) -> None:
         self.exit_event= threading.Event() # Quit gracefully (stops casting session)
+        self.reload_event= threading.Event() # Restart gracefully after quitting. Set *before* setting exit_event.
         self.paused= False
 
-g_config= Config()
-g_globals= Globals()
+g_config= None # Config
+g_globals= None # Globals()
 
 def get_config_file_path():
     return "config.yaml" if (len(sys.argv) == 1) else sys.argv[1]
@@ -64,20 +67,18 @@ def load_config():
                 g_config.local_temp_path= config_yaml["temp_path"]
                 # have the default local_temp_image_list_file_path be relative to local_temp_image_path
                 g_config.local_temp_image_list_file_path= os.path.join(g_config.local_temp_path, g_config.local_temp_image_list_file_name)
-            if "http_server_port" in config_yaml: g_config.http_server_port= int(config_yaml["http_server_port"])
+            if "http_server_port" in config_yaml:
+                g_config.http_server_port= int(config_yaml["http_server_port"])
+                g_config.server_url= "http://" + get_ip() + ":" + str(g_config.http_server_port)
             if "chromecast_name" in config_yaml: g_config.chromecast_friendly_name= config_yaml["chromecast_name"]
             if "slideshow_duration_seconds" in config_yaml: g_config.slideshow_duration_seconds= float(config_yaml["slideshow_duration_seconds"])
-            if "max_image_height_pixels" in config_yaml: g_config.max_image_height_pixels= int(config_yaml["max_image_height_pixels"])
+            if "max_image_height_pixels" in config_yaml:
+                g_config.max_image_height_pixels= int(config_yaml["max_image_height_pixels"])
+                image_processing.set_max_image_height(g_config.max_image_height_pixels)
             if "interruption_idle_seconds" in config_yaml: g_config.interruption_idle_seconds= int(config_yaml["interruption_idle_seconds"])
             # User-facing config option is in minutes for convenience, but using seconds internally since that's what time.sleep() uses.
             if "image_scanning_frequency_minutes" in config_yaml: g_config.image_scanning_frequency_seconds= \
                 60 * int(config_yaml["image_scanning_frequency_minutes"])
-
-# We must load the config before setting...
-#   -server_url, since it references http_server_port
-#   -image_processing.max_image_height_pixels, since we can't modify it from inside load_config(), we have to redirect through a global
-
-load_config()
 
 # In Ubuntu, socket.gethostbyname(socket.gethostname()) returns '127.0.0.1', instead of 192.168.0.X
 # Per, https://stackoverflow.com/questions/166506/finding-local-ip-addresses-using-pythons-stdlib, this will return
@@ -94,9 +95,6 @@ def get_ip():
         finally:
             s.close()
         return IP
-
-server_url= "http://" + get_ip() + ":" + str(g_config.http_server_port)
-image_processing.max_image_height_pixels= g_config.max_image_height_pixels
 
 # file extension to MIME type
 content_type_dictionary= {
@@ -120,7 +118,7 @@ class ImageReference:
 # 2. Remove the root of the local_temp_path because HTTPHandler uses that as the root directory, so it's
 # not included.
 def local_image_file_path_to_url(local_image_file_path):
-    return server_url + "/" + os.path.relpath(local_image_file_path, g_config.local_temp_path)
+    return g_config.server_url + "/" + os.path.relpath(local_image_file_path, g_config.local_temp_path)
 
 # Custom class in order to serve up a specific subdirectory
 class HTTPHandler(http.server.SimpleHTTPRequestHandler):
@@ -174,6 +172,10 @@ class HTTPHandler(http.server.SimpleHTTPRequestHandler):
             elif (command_name == "pause"):
                 g_globals.paused= not g_globals.paused
                 print("Received 'pause' command, toggling pause '%s'." % ("On" if g_globals.paused else "Off"))
+            elif (command_name == "reload"):
+                print("Received 'reload' command, restarting.")
+                g_globals.reload_event.set()
+                g_globals.exit_event.set()
             elif (command_name == "duration_update"):
                 duration_seconds= float(command_parameters)
                 if duration_seconds <= 0:
@@ -219,15 +221,24 @@ class HTTPHandler(http.server.SimpleHTTPRequestHandler):
             self.wfile.write(message.encode('utf-8'))
 
 
-def web_server_thread():
-    try:
-        with http.server.ThreadingHTTPServer(("", g_config.http_server_port), HTTPHandler) as http_server:
-            print("serving at port", g_config.http_server_port)
-            http_server.serve_forever()
-    except Exception as e:
-        print("ERROR: Failed to start web server: '%s'" % e)
-        global g_globals
-        g_globals.exit_event.set()
+class WebServerThread(threading.Thread):
+    def __init__(self):
+        threading.Thread.__init__(self, daemon=True)
+        self.http_server= None
+
+    def run(self):
+        try:
+            with http.server.ThreadingHTTPServer(("", g_config.http_server_port), HTTPHandler) as self.http_server:
+                print("serving at port", g_config.http_server_port)
+                self.http_server.serve_forever()
+        except Exception as e:
+            print("ERROR: Failed to start web server: '%s'" % e)
+            global g_globals
+            g_globals.exit_event.set()
+    
+    def shutdown(self):
+        if self.http_server:
+            self.http_server.shutdown()
 
 
 class ImageServerThread(threading.Thread):
@@ -254,7 +265,7 @@ class ImageServerThread(threading.Thread):
         self.skip_portait_image_names= set()
 
     def run(self):
-        while not g_globals.exit_event.is_set(): # Keep alive forever
+        while not g_globals.exit_event.is_set():
             self.should_serve.wait()
             self.not_serving.clear()
             while self.should_serve.is_set() and not g_globals.exit_event.is_set():
@@ -519,10 +530,10 @@ class ChromeCastPoller:
 
     def wait_for_idle(self):
         was_active= False
-        while True: # keep the thread alive forever
+        while not g_globals.exit_event.is_set():
             self.image_serving_thread.not_serving.wait()
             
-            if was_active:
+            if was_active and not g_globals.exit_event.is_set():
                 print("Bonus interruption idle (%f s): We got interrupted, so maybe something else is trying to start" % g_config.interruption_idle_seconds)
                 time.sleep(g_config.interruption_idle_seconds)
 
@@ -573,7 +584,7 @@ class ImageScanningThread(threading.Thread):
     def run(self):
         scan_interrupt_seconds= 10
 
-        while(True):
+        while(not g_globals.exit_event.is_set()):
             scan_interrupt_timestamp_seconds= time.monotonic() + scan_interrupt_seconds
 
             # Walk local_images_path scanning for supported image files. If we aren't already tracking them in
@@ -611,7 +622,11 @@ class ImageScanningThread(threading.Thread):
             if (len(new_local_image_paths) > 0):
                 self.update_image_server_blocking(new_local_image_paths)
 
-            time.sleep(g_config.image_scanning_frequency_seconds)
+            sleep_time_remaining_seconds= g_config.image_scanning_frequency_seconds
+            while sleep_time_remaining_seconds > 0 and not g_globals.exit_event.is_set():
+                sleep_step_seconds= min(sleep_time_remaining_seconds, 5.0)
+                sleep_time_remaining_seconds= sleep_time_remaining_seconds - sleep_step_seconds
+                time.sleep(sleep_step_seconds)
 
     def update_image_server_blocking(self, new_local_image_paths):
         image_references= [ImageReference(image_path, local_image_file_path_to_url(image_path), ImageLayout.Unknown)
@@ -634,7 +649,7 @@ def main():
 
     print("Serving local directory '%s' and spinning up HTTP server '%s'" % (
         g_config.local_images_path,
-        server_url))
+        g_config.server_url))
 
     # Make sure the spliced image path exists since it's for files generated by the application, don't expect
     # users to create it
@@ -645,7 +660,8 @@ def main():
     shutil.copy("index.html", g_config.local_temp_path)
 
    # Spin up a separate thread to run a web server. The server exposes images in local_images_path to the Chromecast
-    threading.Thread(target= web_server_thread, daemon=True).start()
+    web_server= WebServerThread()
+    web_server.start()
 
     # delete any temp files we created from a previous run (by tracking a list of files)
     # if the list file doesn't exist yet then create it now to track temp files created this run
@@ -695,4 +711,27 @@ def main():
     # Stop the Chromecast Poller (disconnect from the Chromecast) after the image serving thread is done serving
     chromecast_poller.stop()
 
-main()
+    web_server.shutdown()
+    print("Waiting for web server to shut down...")
+    web_server.join()
+    print("Waiting for image server to shut down...")
+    image_serving_thread.join()
+    print("Waiting for image scanner to shut down...")
+    image_scanning_thread.join()
+    print("Waiting for Chromecast Poller to shut down...")
+    chromecast_poller.wait_for_idle_thread.join()
+
+def initialize():
+    global g_config
+    global g_globals
+    
+    g_config= Config()
+    g_globals= Globals()
+    load_config()
+
+while True:
+    initialize()
+    main()
+
+    if (not g_globals.reload_event.is_set()):
+        break

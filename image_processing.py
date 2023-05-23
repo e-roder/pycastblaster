@@ -138,3 +138,7 @@ def splice_images(image_file_name_1, image_file_name_2, spliced_image_file_name)
 			# paste() operates in-place, unlike most PIL functions so no need to assign to image_1
 			image_1.paste(image_2, (image_2.width, 0))
 			image_1.save(spliced_image_file_name)
+
+def set_max_image_height(new_max_image_height_pixels):
+	global max_image_height_pixels
+	max_image_height_pixels= new_max_image_height_pixels
