@@ -1,20 +1,21 @@
-import time
-import pychromecast
-import pychromecast.discovery
-import random
-import os
-import json
+import enum
 import http.server
-import socketserver
-import threading
+import json
+import os
+import random
 import shutil
 import socket
-import image_processing
-import uuid
-import enum
-import yaml
 import sys
+import threading
+import time
+import uuid
+
+import pychromecast
+import pychromecast.discovery
+import ruamel.yaml
 import zeroconf
+
+import image_processing
 
 class Config:
     def __init__(self) -> None:
@@ -42,14 +43,18 @@ class Globals:
 g_config= Config()
 g_globals= Globals()
 
+def get_config_file_path():
+    return "config.yaml" if (len(sys.argv) == 1) else sys.argv[1]
+
 def load_config():
-    config_file_path= "config.yaml" if (len(sys.argv) == 1) else sys.argv[1]
+    config_file_path= get_config_file_path()
 
     if not os.path.exists(config_file_path):
         print("No config file '%s', using default values" % config_file_path)
     else:
         with open(config_file_path) as config_file:
-            config_yaml= yaml.safe_load(config_file)
+            yaml_reader= ruamel.yaml.YAML() # round-trip loader preserves comments
+            config_yaml= yaml_reader.load(config_file)
 
             global g_config
 
@@ -127,8 +132,29 @@ class HTTPHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header('Content-type', 'text/html')
         self.end_headers()
 
+    def do_GET(self):
+
+        if (self.path == "/state"):
+            global g_globals
+
+            status= http.HTTPStatus.OK
+            message= "GET request for {}".format(self.path)
+
+            state_data= {
+                "chromecast_name" : g_config.chromecast_friendly_name,
+                "is_paused" : g_globals.paused,
+                "slideshow_duration_seconds" : g_config.slideshow_duration_seconds
+            }
+            message= json.dumps(state_data)
+
+            self._set_response(status)
+            self.wfile.write(message.encode('utf-8'))
+        else:
+            super().do_GET()
+
     def do_POST(self):
         global g_globals
+        global g_config
 
         content_length = int(self.headers['Content-Length']) # <--- Gets the size of data
         post_data = self.rfile.read(content_length) # <--- Gets the data itself
@@ -148,19 +174,61 @@ class HTTPHandler(http.server.SimpleHTTPRequestHandler):
             elif (command_name == "pause"):
                 g_globals.paused= not g_globals.paused
                 print("Received 'pause' command, toggling pause '%s'." % ("On" if g_globals.paused else "Off"))
+            elif (command_name == "duration_update"):
+                duration_seconds= float(command_parameters)
+                if duration_seconds <= 0:
+                    message= command_name + ": Invalid duration '%s'" % (command_parameters)
+                    status= http.HTTPStatus.BAD_REQUEST
+                else:
+                    print("Received '%s' command, updating duration (%f) -> (%f)" % (command_name, g_config.slideshow_duration_seconds, duration_seconds))
+                    g_config.slideshow_duration_seconds= duration_seconds
+
+                    config_file_path= get_config_file_path()
+
+                    if not os.path.exists(config_file_path):
+                        print("No config file '%s', unable to save change to slideshow duration" % config_file_path)
+                    else:
+                        with open(config_file_path) as config_file_read:
+                            yaml_read_writer= ruamel.yaml.YAML() # round-trip loader preserves comments
+                            yaml_read_writer.preserve_quotes= True
+                            config_yaml= yaml_read_writer.load(config_file_read)
+                            config_yaml["slideshow_duration_seconds"]= g_config.slideshow_duration_seconds
+
+                            config_file_read.close()
+
+                            # Safety dance - make sure we don't do a partial write of the config file
+                            config_file_path_new= config_file_path + ".new"
+                            config_file_path_old= config_file_path + ".old"
+                            with open(config_file_path_new, "w+") as config_file_write:
+                                yaml_read_writer.dump(config_yaml, config_file_write)
+                                config_file_write.close()
+                                
+                                # If os.replace is atomic and safe then we could do: os.replace(config_file_path, config_file_path_new)
+                                if os.path.exists(config_file_path_old):
+                                    os.remove(config_file_path_old)
+                                os.rename(config_file_path, config_file_path_old)
+                                os.rename(config_file_path_new, config_file_path)
+                                os.remove(config_file_path_old)
+                                
             else:
                 message= "Received unknown command '%s'" % (str(command_name))
                 print(message)
                 status= http.HTTPStatus.BAD_REQUEST
 
-        self._set_response(status)
-        self.wfile.write(message.encode('utf-8'))
+            self._set_response(status)
+            self.wfile.write(message.encode('utf-8'))
 
 
 def web_server_thread():
-    with http.server.ThreadingHTTPServer(("", g_config.http_server_port), HTTPHandler) as http_server:
-        print("serving at port", g_config.http_server_port)
-        http_server.serve_forever()
+    try:
+        with http.server.ThreadingHTTPServer(("", g_config.http_server_port), HTTPHandler) as http_server:
+            print("serving at port", g_config.http_server_port)
+            http_server.serve_forever()
+    except Exception as e:
+        print("ERROR: Failed to start web server: '%s'" % e)
+        global g_globals
+        g_globals.exit_event.set()
+
 
 class ImageServerThread(threading.Thread):
     def __init__(self, caster, image_references, temp_image_list_file, temp_image_file_names):
@@ -305,8 +373,10 @@ class ImageServerThread(threading.Thread):
                 print("Stopping Image Server thread because we failed to play media (timed out?).")
                 break
 
-            sleep_time_remaining= g_config.slideshow_duration_seconds            
+            initial_duration_seconds= g_config.slideshow_duration_seconds
+            sleep_time_remaining= initial_duration_seconds
             while (sleep_time_remaining > 0.0):
+                ### Handle Exit Conditions
                 # The casting thread signaled that we should stop, e.g. the Chromecast was removed (turned off?)
                 if not self.should_serve.is_set():
                     interrupted= True # This will cause us to break out of the image loop
@@ -324,6 +394,13 @@ class ImageServerThread(threading.Thread):
                 if self.pending_new_image_references is not None:
                     interrupted= True # This will cause us to break out of the image loop
                     break
+
+                ### Manage Timer
+                # Somebody updated the duration from the website, adjust the current timer
+                if (g_config.slideshow_duration_seconds != initial_duration_seconds):
+                    delta_time= g_config.slideshow_duration_seconds - initial_duration_seconds
+                    initial_duration_seconds= g_config.slideshow_duration_seconds
+                    sleep_time_remaining= max(sleep_time_remaining + delta_time, 0.0)
 
                 sleep_duration= min(sleep_time_remaining, 1.0) # Sleep in one second increments
 

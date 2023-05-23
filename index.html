@@ -2,10 +2,12 @@
 <html>
 <title>Pycastblaster!</title>
 <body>
-    Pycastblaster
-    <br/>
+    Pycastblaster: <div id="chromecast-name-div"></div>
     <br/>
     <button id="pause-btn">Pause</button>
+    <br/>
+    <br/>
+    Slideshow Duration Seconds: <input id="duration-input"></input> <button id="duration-update-btn">Update</button>
     <br/>
     <br/>
     <button id="exit-btn">Exit</button>
@@ -13,6 +15,8 @@
 </html>
 
 <script>
+  const k_state_refresh_seconds= 15.0;
+
   async function post_command(name, parameters)
   {
     try {
@@ -34,9 +38,59 @@
 
     return null;
   }
+
+  function handle_state(state_json)
+  {
+    console.log(state_json);
+
+    chromecast_name_div.textContent= state_json.chromecast_name;
+
+    pause_button.textContent= state_json.is_paused ? "Resume" : "Pause";
+
+    // Don't override the duration that the user has entered.
+    if (duration_input.value == "")
+    {
+        duration_input.value= state_json.slideshow_duration_seconds;
+    }
+  }
+
+  async function get_state(callback_optional)
+  {
+    if (callback_optional == null)
+    {
+      callback_optional= handle_state;
+    }
+
+    try {
+        const response = await fetch('state', {
+            method: 'get',
+            headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
+            }
+        });
+      console.log('Completed!', response);
+
+      callback_optional(await response.json());
+    } catch(err) {
+      console.error(`Error: ${err}`);
+    }
+  }
+
+  function refresh_state()
+  {
+    get_state(null);
+    setTimeout(k_state_refresh_seconds, refresh_state);
+  }
   
+  const chromecast_name_div = document.getElementById('chromecast-name-div');
   const exit_button = document.getElementById('exit-btn');
   exit_button.addEventListener('click', async _ => { response= post_command("exit", "") });
   const pause_button = document.getElementById('pause-btn');
-  pause_button.addEventListener('click', async _ => { response= post_command("pause", "") });
+  pause_button.addEventListener('click', async _ => { response= post_command("pause", "").then(get_state()); });
+  const duration_input = document.getElementById('duration-input');
+  const duration_update_button = document.getElementById('duration-update-btn');
+  duration_update_button.addEventListener('click', async _ => { response= post_command("duration_update", duration_input.value).then(get_state());});
+
+  refresh_state();
 </script>
