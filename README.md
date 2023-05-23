@@ -28,7 +28,7 @@ The program can be configured with a YAML file, "config.yaml" by default. You ca
 | image_scanning_frequency_minutes | Time (in MINUTES) to wait before rescanning for new images. | 10 |
 
 ## Controlling via webbrowser
-You can navigate to <your IP address>:<http_server_port> to access a website and control Pycastblaster. Current features available via the website:
+You can navigate to \<your IP address\>:\<http_server_port\> to access a website and control Pycastblaster. Current features available via the website:
 * Pause: Pause the slideshow on the current image (pauses slideshow timer). Click again to resume.
 * Update Slideshow Duration: Update the "slideshow_duration_seconds" config value. This change is applied immediately and the associated config file is updated as well.
 * Reload Settings: Reload ALL settings, effectively stopping and restarting the program.
