@@ -5,6 +5,10 @@ TODO:
 ---log history
 -image processing
 --black dividing line between spliced images?
+-playlists
+--set in config
+--custom duration?
+--selection via website
 -improve lazy evaluation of is_portait to better handle worst-case scenarios
 --treat unknown-layout images like landscape
 --don't do lazy evaluation when looking for next portrait image to splice with, just treat like landscape

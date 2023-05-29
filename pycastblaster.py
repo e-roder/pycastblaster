@@ -163,19 +163,26 @@ class HTTPHandler(http.server.SimpleHTTPRequestHandler):
             self.wfile.write(message.encode('utf-8'))
         elif (self.path.startswith("/image/")):
             g_globals.image_reference_lock.acquire()
-            image_name= self.path.removeprefix("/image/").replace("%20", " ")
+            image_path_rel= self.path.removeprefix("/image/").replace("%20", " ")
 
             try:
-                with open(os.path.join(g_config.local_images_path, image_name), "rb") as image_file:
-                    #note that this potentially makes every file on your computer readable by the internet
-                    self.send_response(http.HTTPStatus.OK)
-                    extension= os.path.splitext(image_name)[1].lower()
-                    content_type= content_type_dictionary[extension]
-                    self.send_header('Content-type', content_type)
-                    self.end_headers()
-                    self.wfile.write(image_file.read())
+                # Make sure the requested image path is within the local image path - no extracurricular explorations!
+                local_image_path_abs= os.path.abspath(g_config.local_images_path)
+                image_path_abs= os.path.abspath(os.path.join(local_image_path_abs, image_path_rel))
+
+                if os.path.commonpath([local_image_path_abs]) == os.path.commonpath([local_image_path_abs, image_path_abs]):
+                    with open(os.path.join(g_config.local_images_path, image_path_rel), "rb") as image_file:
+                        #note that this potentially makes every file on your computer readable by the internet
+                        self.send_response(http.HTTPStatus.OK)
+                        extension= os.path.splitext(image_path_rel)[1].lower()
+                        content_type= content_type_dictionary[extension]
+                        self.send_header('Content-type', content_type)
+                        self.end_headers()
+                        self.wfile.write(image_file.read())
+                else:
+                    self.send_error(http.HTTPStatus.NOT_FOUND,"File Not Found: '%s'" % (image_path_rel))
             except IOError as e:
-                self.send_error(http.HTTPStatus.NOT_FOUND,"File Not Found: '%s': '%s'" % (image_name, e))
+                self.send_error(http.HTTPStatus.NOT_FOUND,"File Not Found: '%s': '%s'" % (image_path_rel, e))
             except Exception as e:
                 self.send_error(http.HTTPStatus.BAD_REQUEST,"Error: '%s'" % e)
             finally:
