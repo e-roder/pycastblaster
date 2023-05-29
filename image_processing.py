@@ -1,4 +1,4 @@
-import PIL.Image, PIL.ImageOps, PIL.ImageFilter
+import PIL.Image, PIL.ImageDraw, PIL.ImageOps, PIL.ImageFilter
 import pillow_heif
 import os.path
 import enum
@@ -137,6 +137,9 @@ def splice_images(image_file_name_1, image_file_name_2, spliced_image_file_name)
 			# Make sure to use image_2.width since image_1 has been resized.
 			# paste() operates in-place, unlike most PIL functions so no need to assign to image_1
 			image_1.paste(image_2, (image_2.width, 0))
+			image_drawer= PIL.ImageDraw.Draw(image_1)
+			divider_half_width_px= 4
+			image_drawer.rectangle((image_2.width - divider_half_width_px, 0, image_2.width + divider_half_width_px, image_2.height), fill="#000000")
 			image_1.save(spliced_image_file_name)
 
 def set_max_image_height(new_max_image_height_pixels):

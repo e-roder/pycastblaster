@@ -1,10 +1,5 @@
 TODO:
 -curate images
--UI/UX: via webserver?
---inspection/state
----log history
--image processing
---black dividing line between spliced images?
 -playlists
 --set in config
 --custom duration?
