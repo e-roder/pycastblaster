@@ -1,178 +1,178 @@
 <!DOCTYPE html>
 <html>
-<title>Pycastblaster!</title>
-<body>
-    Pycastblaster: <div id="chromecast-name-div"></div>
-    <br/>
-    <button id="pause-btn">Pause</button>
-    <br/>
-    <br/>
-    Slideshow Duration Seconds: <input id="duration-input"></input> <button id="duration-update-btn">Update</button>
-    <br/>
-    <br/>
-    <div id="current-image-label-div">Current Image: ???</div>
-    <table>
-      <tr>
-        <td>
-          <select name="image-list" id="image-list" size="14" style="min-width:200px;"></select>
-        </td>
-        <td>
-          <img id="image-preview" style="max-width:400px;max-height:400px;">
-        </td>
-      </tr>
-    </table>
-    <br/>
-    <br/>
-    <button id="reload-btn">Reload Settings</button>
-    <br/>
-    <br/>
-    <button id="exit-btn">Exit</button>
-</body>
+	<title>Pycastblaster!</title>
+	<body>
+		Pycastblaster: <div id="chromecast-name-div"></div>
+		<br/>
+		<button id="pause-btn">Pause</button>
+		<br/>
+		<br/>
+		Slideshow Duration Seconds: <input id="duration-input"></input> <button id="duration-update-btn">Update</button>
+		<br/>
+		<br/>
+		<div id="current-image-label-div">Current Image: ???</div>
+		<table>
+			<tr>
+				<td>
+					<select name="image-list" id="image-list" size="14" style="min-width:200px;"></select>
+				</td>
+				<td>
+					<img id="image-preview" style="max-width:400px;max-height:400px;">
+				</td>
+			</tr>
+		</table>
+		<br/>
+		<br/>
+		<button id="reload-btn">Reload Settings</button>
+		<br/>
+		<br/>
+		<button id="exit-btn">Exit</button>
+	</body>
 </html>
 
 <script>
-  const k_state_refresh_seconds= 15.0;
+	const k_state_refresh_seconds= 15.0;
 
-  async function post_command(name, parameters)
-  {
-    try {
-        const body_object= { "name" : name, "parameters": parameters};
-        const response = await fetch('command', {
-            method: 'post',
-            headers: {
-            'Accept': 'application/json',
-            'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(body_object)
-        });
-      console.log('Completed!', response);
+	async function post_command(name, parameters)
+	{
+		try {
+				const body_object= { "name" : name, "parameters": parameters};
+				const response= await fetch('command', {
+						method: 'post',
+						headers: {
+						'Accept': 'application/json',
+						'Content-Type': 'application/json'
+						},
+						body: JSON.stringify(body_object)
+				});
+			console.log('Completed!', response);
 
-      return response;
-    } catch(err) {
-      console.error(`Error: ${err}`);
-    }
+			return response;
+		} catch(err) {
+			console.error(`Error: ${err}`);
+		}
 
-    return null;
-  }
+		return null;
+	}
 
-  function handle_state(state_json)
-  {
-    console.log(state_json);
+	function handle_state(state_json)
+	{
+		console.log(state_json);
 
-    chromecast_name_div.textContent= state_json.chromecast_name;
+		chromecast_name_div.textContent= state_json.chromecast_name;
 
-    pause_button.textContent= state_json.is_paused ? "Resume" : "Pause";
+		pause_button.textContent= state_json.is_paused ? "Resume" : "Pause";
 
-    if (state_json.current_image_index != -1)
-    {
-      const relative_image_index= state_json.current_image_index - state_json.images_min_index;
-      const current_image_name= state_json.images[relative_image_index];
+		if (state_json.current_image_index != -1)
+		{
+			const relative_image_index= state_json.current_image_index - state_json.images_min_index;
+			const current_image_name= state_json.images[relative_image_index];
 
-      current_image_label_dev.textContent= `Current Image: ${current_image_name} (${state_json.current_image_index + 1} / ${state_json.image_count})`
+			current_image_label_dev.textContent= `Current Image: ${current_image_name} (${state_json.current_image_index + 1} / ${state_json.image_count})`
 
-      // Update image list
-      const selected_text= image_list.selectedIndex != -1
-          ? image_list[image_list.selectedIndex].text
-          : "";
+			// Update image list
+			const selected_text= image_list.selectedIndex != -1
+					? image_list[image_list.selectedIndex].text
+					: "";
 
-      while(image_list.length > 0) image_list.remove(0); // Empty current image list
-      
-      for (image_index = 0; image_index < state_json.images.length; image_index++)
-      {
-          var opt = document.createElement('option');
+			while(image_list.length > 0) image_list.remove(0); // Empty current image list
+			
+			for (image_index= 0; image_index < state_json.images.length; image_index++)
+			{
+					var opt= document.createElement('option');
 
-          opt.text = state_json.images[image_index];
-          opt.value = state_json.images[image_index];
-          image_list.add(opt);
+					opt.text= state_json.images[image_index];
+					opt.value= state_json.images[image_index];
+					image_list.add(opt);
 
-          if (selected_text != "" && selected_text == opt.text)
-          {
-           image_list.selectedIndex= image_index; 
-          }
-      }
+					if (selected_text != "" && selected_text == opt.text)
+					{
+					 image_list.selectedIndex= image_index; 
+					}
+			}
 
-      if (image_list.selectedIndex == -1)
-      {
-        image_list.selectedIndex= relative_image_index;
-        get_selected_image();
-      }
-    }
+			if (image_list.selectedIndex == -1)
+			{
+				image_list.selectedIndex= relative_image_index;
+				get_selected_image();
+			}
+		}
 
-    // Don't override the duration that the user has entered.
-    if (duration_input.value == "")
-    {
-        duration_input.value= state_json.slideshow_duration_seconds;
-    }
-  }
+		// Don't override the duration that the user has entered.
+		if (duration_input.value == "")
+		{
+				duration_input.value= state_json.slideshow_duration_seconds;
+		}
+	}
 
-  async function get_state(callback_optional)
-  {
-    if (callback_optional == null)
-    {
-      callback_optional= handle_state;
-    }
+	async function get_state(callback_optional)
+	{
+		if (callback_optional == null)
+		{
+			callback_optional= handle_state;
+		}
 
-    try {
-        const response = await fetch('state', {
-            method: 'get',
-            headers: {
-            'Accept': 'application/json',
-            'Content-Type': 'application/json'
-            }
-        });
-      console.log('Completed!', response);
+		try {
+				const response= await fetch('state', {
+						method: 'get',
+						headers: {
+						'Accept': 'application/json',
+						'Content-Type': 'application/json'
+						}
+				});
+			console.log('Completed!', response);
 
-      callback_optional(await response.json());
-    } catch(err) {
-      console.error(`Error: ${err}`);
-    }
-  }
+			callback_optional(await response.json());
+		} catch(err) {
+			console.error(`Error: ${err}`);
+		}
+	}
 
-  async function get_selected_image()
-  {
-    const selected_image_name= image_list.selectedIndex != -1
-        ? image_list[image_list.selectedIndex].text
-        : "";
-    
-    if (selected_image_name != "")
-    {
-      try {
-          const response = await fetch(`image\\${selected_image_name}`, {
-              method: 'get'
-          });
-        console.log('Completed!', response);
+	async function get_selected_image()
+	{
+		const selected_image_name= image_list.selectedIndex != -1
+				? image_list[image_list.selectedIndex].text
+				: "";
+		
+		if (selected_image_name != "")
+		{
+			try {
+					const response= await fetch(`image\\${selected_image_name}`, {
+							method: 'get'
+					});
+				console.log('Completed!', response);
 
-        const imageBlob = await response.blob()
-        const imageObjectURL = URL.createObjectURL(imageBlob);
-        image_preview.src= imageObjectURL;
-        
-      } catch(err) {
-        console.error(`Error: ${err}`);
-      }
-    }
-  }
+				const imageBlob= await response.blob()
+				const imageObjectURL= URL.createObjectURL(imageBlob);
+				image_preview.src= imageObjectURL;
+				
+			} catch(err) {
+				console.error(`Error: ${err}`);
+			}
+		}
+	}
 
-  function refresh_state()
-  {
-    setTimeout(refresh_state, k_state_refresh_seconds * 1000);
-    console.log("refresh_state()")
-    get_state(null);
-  }
-  
-  const chromecast_name_div = document.getElementById('chromecast-name-div');
-  const exit_button = document.getElementById('exit-btn');
-  exit_button.addEventListener('click', async _ => { response= post_command("exit", "") });
-  const pause_button = document.getElementById('pause-btn');
-  pause_button.addEventListener('click', async _ => { response= post_command("pause", "").then(get_state()); });
-  const reload_button = document.getElementById('reload-btn');
-  reload_button.addEventListener('click', async _ => { response= post_command("reload", "").then(get_state()); });
-  const duration_input = document.getElementById('duration-input');
-  const duration_update_button = document.getElementById('duration-update-btn');
-  duration_update_button.addEventListener('click', async _ => { response= post_command("duration_update", duration_input.value).then(get_state());});
-  const current_image_label_dev = document.getElementById('current-image-label-div');
-  const image_list = document.getElementById('image-list');
-  image_list.addEventListener('change', async _ => { response= get_selected_image(); } );
-  const image_preview = document.getElementById('image-preview');
+	function refresh_state()
+	{
+		setTimeout(refresh_state, k_state_refresh_seconds * 1000);
+		console.log("refresh_state()")
+		get_state(null);
+	}
+	
+	const chromecast_name_div= document.getElementById('chromecast-name-div');
+	const exit_button= document.getElementById('exit-btn');
+	exit_button.addEventListener('click', async _ => { response= post_command("exit", "") });
+	const pause_button= document.getElementById('pause-btn');
+	pause_button.addEventListener('click', async _ => { response= post_command("pause", "").then(get_state()); });
+	const reload_button= document.getElementById('reload-btn');
+	reload_button.addEventListener('click', async _ => { response= post_command("reload", "").then(get_state()); });
+	const duration_input= document.getElementById('duration-input');
+	const duration_update_button= document.getElementById('duration-update-btn');
+	duration_update_button.addEventListener('click', async _ => { response= post_command("duration_update", duration_input.value).then(get_state());});
+	const current_image_label_dev= document.getElementById('current-image-label-div');
+	const image_list= document.getElementById('image-list');
+	image_list.addEventListener('change', async _ => { response= get_selected_image(); } );
+	const image_preview= document.getElementById('image-preview');
 
-  refresh_state();
+	refresh_state();
 </script>
