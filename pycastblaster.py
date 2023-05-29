@@ -42,6 +42,10 @@ class Globals:
         self.exit_event= threading.Event() # Quit gracefully (stops casting session)
         self.reload_event= threading.Event() # Restart gracefully after quitting. Set *before* setting exit_event.
         self.paused= False
+        # State of the ImageServerThread, stored in globals so that it can be accessed by the HTTP Request Handlers
+        self.image_references= ()
+        self.current_image_reference_index= -1
+        self.image_reference_lock= threading.Lock()
 
 g_config= None # Config
 g_globals= None # Globals()
@@ -131,22 +135,51 @@ class HTTPHandler(http.server.SimpleHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
+        global g_globals
 
         if (self.path == "/state"):
-            global g_globals
+            g_globals.image_reference_lock.acquire()
 
             status= http.HTTPStatus.OK
             message= "GET request for {}".format(self.path)
+            image_index_min= max(g_globals.current_image_reference_index - 4, 0)
+            image_index_max= min(g_globals.current_image_reference_index + 10, len(g_globals.image_references) - 1)
+            image_subset= g_globals.image_references[image_index_min:image_index_max]
 
             state_data= {
                 "chromecast_name" : g_config.chromecast_friendly_name,
                 "is_paused" : g_globals.paused,
-                "slideshow_duration_seconds" : g_config.slideshow_duration_seconds
+                "slideshow_duration_seconds" : g_config.slideshow_duration_seconds,
+                "image_path" : g_config.local_images_path,
+                "images" : [os.path.relpath(image_reference.local_image_path, g_config.local_images_path) for image_reference in image_subset],
+                "current_image_index" : g_globals.current_image_reference_index,
+                "images_min_index" : image_index_min,
+                "image_count" : len(g_globals.image_references),
             }
             message= json.dumps(state_data)
+            g_globals.image_reference_lock.release()
 
             self._set_response(status)
             self.wfile.write(message.encode('utf-8'))
+        elif (self.path.startswith("/image/")):
+            g_globals.image_reference_lock.acquire()
+            image_name= self.path.removeprefix("/image/").replace("%20", " ")
+
+            try:
+                with open(os.path.join(g_config.local_images_path, image_name), "rb") as image_file:
+                    #note that this potentially makes every file on your computer readable by the internet
+                    self.send_response(http.HTTPStatus.OK)
+                    extension= os.path.splitext(image_name)[1].lower()
+                    content_type= content_type_dictionary[extension]
+                    self.send_header('Content-type', content_type)
+                    self.end_headers()
+                    self.wfile.write(image_file.read())
+            except IOError as e:
+                self.send_error(http.HTTPStatus.NOT_FOUND,"File Not Found: '%s': '%s'" % (image_name, e))
+            except Exception as e:
+                self.send_error(http.HTTPStatus.BAD_REQUEST,"Error: '%s'" % e)
+            finally:
+                g_globals.image_reference_lock.release()
         else:
             super().do_GET()
 
@@ -242,7 +275,7 @@ class WebServerThread(threading.Thread):
 
 
 class ImageServerThread(threading.Thread):
-    def __init__(self, caster, image_references, temp_image_list_file, temp_image_file_names):
+    def __init__(self, caster, temp_image_list_file, temp_image_file_names):
         threading.Thread.__init__(self, daemon=True)
         
         # Synchronization: internal events, use start_serving and stop_serving_and_wait
@@ -251,7 +284,7 @@ class ImageServerThread(threading.Thread):
         self.not_serving.set()
 
         self.caster= caster
-        self.image_references= image_references
+        self.image_references= []
         self.pending_new_image_references= None # 
         random.shuffle(self.image_references)
         self.temp_image_list_file= temp_image_list_file
@@ -302,6 +335,12 @@ class ImageServerThread(threading.Thread):
             # Finally, swap the merged image list into place
             self.image_references= merged_image_references
 
+            # Keep the global list of image references up to date
+            global g_globals
+            g_globals.image_reference_lock.acquire()
+            g_globals.image_references= self.image_references
+            g_globals.image_reference_lock.release()
+
             # Invalidate self.pending_new_image_references once we're done to signal that we're ready to accept
             # more new images from the Image Scanner.
             self.pending_new_image_references= None
@@ -312,6 +351,11 @@ class ImageServerThread(threading.Thread):
         interrupted= False
 
         for image_index, image_reference in enumerate(self.image_references[start_index:], start_index):
+            global g_globals
+            g_globals.image_reference_lock.acquire()
+            g_globals.current_image_reference_index= image_index
+            g_globals.image_reference_lock.release()
+
             # Lazily evaluate IsPortrait rather than on startup because it's slow (need to open image file and
             # potentially transpose it)
             if image_reference.image_layout == ImageLayout.Unknown:
@@ -629,7 +673,7 @@ class ImageScanningThread(threading.Thread):
                 time.sleep(sleep_step_seconds)
 
     def update_image_server_blocking(self, new_local_image_paths):
-        image_references= [ImageReference(image_path, local_image_file_path_to_url(image_path), ImageLayout.Unknown)
+        image_references= [ImageReference(image_path, "", ImageLayout.Unknown)
             for image_path in new_local_image_paths]
 
         self.image_server.add_image_references(image_references)
@@ -687,7 +731,7 @@ def main():
     # 2. Image Server: Serves images to Chromecast when told by the Chromecast Poller.
     # 3. Image Scanner: Periodically scans for new images and merges them into the list of the Image Server
     chromecast_poller= ChromeCastPoller(g_config.chromecast_friendly_name)
-    image_serving_thread= ImageServerThread(chromecast_poller, [], temp_image_list_file, temp_image_file_names)
+    image_serving_thread= ImageServerThread(chromecast_poller, temp_image_list_file, temp_image_file_names)
     image_scanning_thread= ImageScanningThread(image_serving_thread)
 
     chromecast_poller.image_serving_thread= image_serving_thread

@@ -2,9 +2,6 @@ TODO:
 -curate images
 -UI/UX: via webserver?
 --inspection/state
----image history/upcoming
-----image preview
-----jump to image
 ---log history
 -image processing
 --black dividing line between spliced images?

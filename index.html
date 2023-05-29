@@ -10,6 +10,19 @@
     Slideshow Duration Seconds: <input id="duration-input"></input> <button id="duration-update-btn">Update</button>
     <br/>
     <br/>
+    <div id="current-image-label-div">Current Image: ???</div>
+    <table>
+      <tr>
+        <td>
+          <select name="image-list" id="image-list" size="14" style="min-width:200px;"></select>
+        </td>
+        <td>
+          <img id="image-preview" style="max-width:400px;max-height:400px;">
+        </td>
+      </tr>
+    </table>
+    <br/>
+    <br/>
     <button id="reload-btn">Reload Settings</button>
     <br/>
     <br/>
@@ -50,6 +63,41 @@
 
     pause_button.textContent= state_json.is_paused ? "Resume" : "Pause";
 
+    if (state_json.current_image_index != -1)
+    {
+      const relative_image_index= state_json.current_image_index - state_json.images_min_index;
+      const current_image_name= state_json.images[relative_image_index];
+
+      current_image_label_dev.textContent= `Current Image: ${current_image_name} (${state_json.current_image_index + 1} / ${state_json.image_count})`
+
+      // Update image list
+      const selected_text= image_list.selectedIndex != -1
+          ? image_list[image_list.selectedIndex].text
+          : "";
+
+      while(image_list.length > 0) image_list.remove(0); // Empty current image list
+      
+      for (image_index = 0; image_index < state_json.images.length; image_index++)
+      {
+          var opt = document.createElement('option');
+
+          opt.text = state_json.images[image_index];
+          opt.value = state_json.images[image_index];
+          image_list.add(opt);
+
+          if (selected_text != "" && selected_text == opt.text)
+          {
+           image_list.selectedIndex= image_index; 
+          }
+      }
+
+      if (image_list.selectedIndex == -1)
+      {
+        image_list.selectedIndex= relative_image_index;
+        get_selected_image();
+      }
+    }
+
     // Don't override the duration that the user has entered.
     if (duration_input.value == "")
     {
@@ -80,10 +128,35 @@
     }
   }
 
+  async function get_selected_image()
+  {
+    const selected_image_name= image_list.selectedIndex != -1
+        ? image_list[image_list.selectedIndex].text
+        : "";
+    
+    if (selected_image_name != "")
+    {
+      try {
+          const response = await fetch(`image\\${selected_image_name}`, {
+              method: 'get'
+          });
+        console.log('Completed!', response);
+
+        const imageBlob = await response.blob()
+        const imageObjectURL = URL.createObjectURL(imageBlob);
+        image_preview.src= imageObjectURL;
+        
+      } catch(err) {
+        console.error(`Error: ${err}`);
+      }
+    }
+  }
+
   function refresh_state()
   {
+    setTimeout(refresh_state, k_state_refresh_seconds * 1000);
+    console.log("refresh_state()")
     get_state(null);
-    setTimeout(k_state_refresh_seconds, refresh_state);
   }
   
   const chromecast_name_div = document.getElementById('chromecast-name-div');
@@ -96,6 +169,10 @@
   const duration_input = document.getElementById('duration-input');
   const duration_update_button = document.getElementById('duration-update-btn');
   duration_update_button.addEventListener('click', async _ => { response= post_command("duration_update", duration_input.value).then(get_state());});
+  const current_image_label_dev = document.getElementById('current-image-label-div');
+  const image_list = document.getElementById('image-list');
+  image_list.addEventListener('change', async _ => { response= get_selected_image(); } );
+  const image_preview = document.getElementById('image-preview');
 
   refresh_state();
 </script>
