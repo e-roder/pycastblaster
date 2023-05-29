@@ -46,6 +46,9 @@ class Globals:
 		self.image_references= ()
 		self.current_image_reference_index= -1
 		self.image_reference_lock= threading.Lock()
+		
+		self.recent_logs= []
+		self.recent_logs_lock= threading.Lock()
 
 g_config= None # Config
 g_globals= None # Globals()
@@ -57,7 +60,7 @@ def load_config():
 	config_file_path= get_config_file_path()
 
 	if not os.path.exists(config_file_path):
-		print("No config file '%s', using default values" % config_file_path)
+		log("No config file '%s', using default values" % config_file_path)
 	else:
 		with open(config_file_path) as config_file:
 			yaml_reader= ruamel.yaml.YAML() # round-trip loader preserves comments
@@ -124,6 +127,24 @@ class ImageReference:
 def local_image_file_path_to_url(local_image_file_path):
 	return g_config.server_url + "/" + os.path.relpath(local_image_file_path, g_config.local_temp_path)
 
+def log(string_arg):
+	current_time = time.localtime()
+	string= "%s: %s" % (time.strftime("%m/%d/%Y %H:%M:%S", current_time), string_arg)
+	print(string)
+
+	global g_globals
+
+	if (g_globals):
+		g_globals.recent_logs_lock.acquire()
+		g_globals.recent_logs.append(string)
+
+		max_log_lines= 200
+
+		while (len(g_globals.recent_logs) > max_log_lines):
+			g_globals.recent_logs.pop(0)
+
+		g_globals.recent_logs_lock.release()
+
 # Custom class in order to serve up a specific subdirectory
 class HTTPHandler(http.server.SimpleHTTPRequestHandler):
 	def __init__(self, *args, **kwargs):
@@ -139,6 +160,7 @@ class HTTPHandler(http.server.SimpleHTTPRequestHandler):
 
 		if (self.path == "/state"):
 			g_globals.image_reference_lock.acquire()
+			g_globals.recent_logs_lock.acquire()
 
 			status= http.HTTPStatus.OK
 			message= "GET request for {}".format(self.path)
@@ -155,8 +177,10 @@ class HTTPHandler(http.server.SimpleHTTPRequestHandler):
 				"current_image_index" : g_globals.current_image_reference_index,
 				"images_min_index" : image_index_min,
 				"image_count" : len(g_globals.image_references),
+				"log_lines" : g_globals.recent_logs
 			}
 			message= json.dumps(state_data)
+			g_globals.recent_logs_lock.release()
 			g_globals.image_reference_lock.release()
 
 			self._set_response(status)
@@ -197,7 +221,7 @@ class HTTPHandler(http.server.SimpleHTTPRequestHandler):
 		content_length = int(self.headers['Content-Length']) # <--- Gets the size of data
 		post_data = self.rfile.read(content_length) # <--- Gets the data itself
 		post_data_string= post_data.decode('utf-8')
-		# print("POST request,\nPath: %s\nHeaders:\n%s\n\nBody:\n%s\n" % (str(self.path), str(self.headers), post_data_string))
+		# log("POST request,\nPath: %s\nHeaders:\n%s\n\nBody:\n%s\n" % (str(self.path), str(self.headers), post_data_string))
 		status= http.HTTPStatus.OK
 		message= "POST request for {}".format(self.path)
 
@@ -207,13 +231,13 @@ class HTTPHandler(http.server.SimpleHTTPRequestHandler):
 			command_parameters= post_data_json["parameters"]
 
 			if (command_name == "exit"):
-				print("Received 'exit' command, quitting.")
+				log("Received 'exit' command, quitting.")
 				g_globals.exit_event.set()
 			elif (command_name == "pause"):
 				g_globals.paused= not g_globals.paused
-				print("Received 'pause' command, toggling pause '%s'." % ("On" if g_globals.paused else "Off"))
+				log("Received 'pause' command, toggling pause '%s'." % ("On" if g_globals.paused else "Off"))
 			elif (command_name == "reload"):
-				print("Received 'reload' command, restarting.")
+				log("Received 'reload' command, restarting.")
 				g_globals.reload_event.set()
 				g_globals.exit_event.set()
 			elif (command_name == "duration_update"):
@@ -222,13 +246,13 @@ class HTTPHandler(http.server.SimpleHTTPRequestHandler):
 					message= command_name + ": Invalid duration '%s'" % (command_parameters)
 					status= http.HTTPStatus.BAD_REQUEST
 				else:
-					print("Received '%s' command, updating duration (%f) -> (%f)" % (command_name, g_config.slideshow_duration_seconds, duration_seconds))
+					log("Received '%s' command, updating duration (%f) -> (%f)" % (command_name, g_config.slideshow_duration_seconds, duration_seconds))
 					g_config.slideshow_duration_seconds= duration_seconds
 
 					config_file_path= get_config_file_path()
 
 					if not os.path.exists(config_file_path):
-						print("No config file '%s', unable to save change to slideshow duration" % config_file_path)
+						log("No config file '%s', unable to save change to slideshow duration" % config_file_path)
 					else:
 						with open(config_file_path) as config_file_read:
 							yaml_read_writer= ruamel.yaml.YAML() # round-trip loader preserves comments
@@ -254,7 +278,7 @@ class HTTPHandler(http.server.SimpleHTTPRequestHandler):
 								
 			else:
 				message= "Received unknown command '%s'" % (str(command_name))
-				print(message)
+				log(message)
 				status= http.HTTPStatus.BAD_REQUEST
 
 			self._set_response(status)
@@ -269,10 +293,10 @@ class WebServerThread(threading.Thread):
 	def run(self):
 		try:
 			with http.server.ThreadingHTTPServer(("", g_config.http_server_port), HTTPHandler) as self.http_server:
-				print("serving at port", g_config.http_server_port)
+				log("serving at port [%d]" % g_config.http_server_port)
 				self.http_server.serve_forever()
 		except Exception as e:
-			print("ERROR: Failed to start web server: '%s'" % e)
+			log("ERROR: Failed to start web server: '%s'" % e)
 			global g_globals
 			g_globals.exit_event.set()
 	
@@ -329,7 +353,7 @@ class ImageServerThread(threading.Thread):
 	def merge_pending_image_references(self):
 		if not self.pending_new_image_references is None:
 			# Merge in the new images so that we don't replay images we've already served.
-			print("Merging in [%d] new images." % (len(self.pending_new_image_references)))
+			log("Merging in [%d] new images." % (len(self.pending_new_image_references)))
 
 			# First, shuffle the new images with the images that haven't been served yet
 			shuffled_image_references= self.image_references[self.previous_image_index:]
@@ -395,7 +419,7 @@ class ImageServerThread(threading.Thread):
 						# if we reuse file names)
 						spliced_image_file_name= os.path.join(g_config.local_temp_path, str(uuid.uuid4())) + ".jpg"
 						self.temp_image_file_names.append(spliced_image_file_name)
-						print("Splicing '%s' + '%s' into '%s'" % (image_reference.local_image_path, search_image.local_image_path, spliced_image_file_name))
+						log("Splicing '%s' + '%s' into '%s'" % (image_reference.local_image_path, search_image.local_image_path, spliced_image_file_name))
 						# create temporary spliced image
 						image_processing.splice_images(image_reference.local_image_path, search_image.local_image_path, spliced_image_file_name)
 						# generate a temporary image reference to the spliced image that now has a landscape layout
@@ -417,7 +441,7 @@ class ImageServerThread(threading.Thread):
 			if len(self.temp_image_file_names) > 2:
 				to_delete= self.temp_image_file_names.pop(0)
 				if os.path.exists(to_delete):
-					print("Purging temporary image '%s'" % to_delete)
+					log("Purging temporary image '%s'" % to_delete)
 					os.remove(to_delete)
 
 			# update list of temporary image files
@@ -432,7 +456,7 @@ class ImageServerThread(threading.Thread):
 				# before we trigger some exception in the pychromecast library
 				self.should_serve.clear()
 				interrupted= True
-				print("Stopping Image Server thread because we failed to play media (timed out?).")
+				log("Stopping Image Server thread because we failed to play media (timed out?).")
 				break
 
 			initial_duration_seconds= g_config.slideshow_duration_seconds
@@ -480,7 +504,7 @@ class ImageServerThread(threading.Thread):
 		# It's not quite trivial to compare previous_image_index against the number of images because we might skip
 		# the last image without incrementing previous_image_index.
 		if not interrupted:
-			print("Image list complete, shuffling and restarting")
+			log("Image list complete, shuffling and restarting")
 			random.shuffle(self.image_references)
 			self.previous_image_index= 0
 			self.skip_portait_image_names.clear()
@@ -495,7 +519,7 @@ class CanCastResult(enum.IntEnum):
 class ChromeCastPoller:
 	def __init__(self, chromecast_friendly_name):
 		def add_callback(uuid, _service):
-			print("Chromecast added %s (%s)", self.browser.devices[uuid].friendly_name, uuid)
+			log("Chromecast added %s (%s)" % (self.browser.devices[uuid].friendly_name, uuid))
 			
 			if (self.browser.devices[uuid].friendly_name == self.friendly_name):
 				if self.cast_lock.acquire():
@@ -508,7 +532,7 @@ class ChromeCastPoller:
 					self.cast_lock.release()
 
 		def remove_callback(uuid, _service, cast_info):
-			print("Chromecast removed %s (%s)", self.browser.devices[uuid].friendly_name, uuid)
+			log("Chromecast removed %s (%s)" % (self.browser.devices[uuid].friendly_name, uuid))
 
 			def get_chromecast_from_uuid(uuid):
 				return pychromecast.get_chromecast_from_cast_info(self.browser.devices[uuid], zconf=self.browser.zc)
@@ -538,7 +562,7 @@ class ChromeCastPoller:
 		
 		self.browser.start_discovery()
 
-		print("Chrome Cast poller started, looking for '%s'" % self.friendly_name)
+		log("Chrome Cast poller started, looking for '%s'" % self.friendly_name)
 
 	def stop(self):
 		if self.cast_lock.acquire():
@@ -585,7 +609,7 @@ class ChromeCastPoller:
 			self.image_serving_thread.not_serving.wait()
 			
 			if was_active and not g_globals.exit_event.is_set():
-				print("Bonus interruption idle (%f s): We got interrupted, so maybe something else is trying to start" % g_config.interruption_idle_seconds)
+				log("Bonus interruption idle (%f s): We got interrupted, so maybe something else is trying to start" % g_config.interruption_idle_seconds)
 				time.sleep(g_config.interruption_idle_seconds)
 
 			can_cast, reason= self.can_cast(must_be_active= False)
@@ -596,7 +620,7 @@ class ChromeCastPoller:
 				was_active= True
 			else:
 				was_active= False
-				print("Blocking for idle, reason: %s" % reason)
+				log("Blocking for idle, reason: %s" % reason)
 
 			time.sleep(5)
 
@@ -609,17 +633,17 @@ class ChromeCastPoller:
 			if can_cast == CanCastResult.Success:
 				extension= os.path.splitext(url)[1].lower()
 				content_type= content_type_dictionary[extension]
-				print("Serving '%s'" % url)
+				log("Serving '%s'" % url)
 				try:
 					self.chromecast.media_controller.play_media(url, content_type)
 					self.chromecast.media_controller.block_until_active(timeout=1.0)
 					success= self.chromecast.media_controller.session_active_event.is_set()
 				except pychromecast.error.NotConnected:
-					print("Couldn't play media, Chromecast not connected")
+					log("Couldn't play media, Chromecast not connected")
 				except pychromecast.error.ControllerNotRegistered:
-					print("Couldn't play media, Controller not registered")
+					log("Couldn't play media, Controller not registered")
 			else:
-				print("Couldn't play media, reason: %s" % reason)
+				log("Couldn't play media, reason: %s" % reason)
 
 			self.cast_lock.release()
 		
@@ -663,7 +687,7 @@ class ImageScanningThread(threading.Thread):
 								# Make sure to clear out the list of new images so they don't get added again.
 								new_local_image_paths.clear()
 			else:
-				print("ERROR: Image Path '%s' does not exist" % (g_config.local_images_path))
+				log("ERROR: Image Path '%s' does not exist" % (g_config.local_images_path))
 			
 			# Once we have an initial set of images, no need to update the image server in the middle of scanning images anymore, since it
 			# probably slows down the scanning process.
@@ -698,7 +722,7 @@ class ImageScanningThread(threading.Thread):
 def main():
 	random.seed()
 
-	print("Serving local directory '%s' and spinning up HTTP server '%s'" % (
+	log("Serving local directory '%s' and spinning up HTTP server '%s'" % (
 		g_config.local_images_path,
 		g_config.server_url))
 
@@ -723,7 +747,7 @@ def main():
 			# in the directory we expect
 			file_name_to_delete= os.path.join(g_config.local_temp_path, os.path.basename(line.strip()))
 			if os.path.exists(file_name_to_delete):
-				print("Purging temporary image '%s' from '%s'" % (file_name_to_delete, g_config.local_temp_image_list_file_path))
+				log("Purging temporary image '%s' from '%s'" % (file_name_to_delete, g_config.local_temp_image_list_file_path))
 				os.remove(file_name_to_delete)
 		
 		temp_image_list_file.seek(0)
@@ -763,13 +787,13 @@ def main():
 	chromecast_poller.stop()
 
 	web_server.shutdown()
-	print("Waiting for web server to shut down...")
+	log("Waiting for web server to shut down...")
 	web_server.join()
-	print("Waiting for image server to shut down...")
+	log("Waiting for image server to shut down...")
 	image_serving_thread.join()
-	print("Waiting for image scanner to shut down...")
+	log("Waiting for image scanner to shut down...")
 	image_scanning_thread.join()
-	print("Waiting for Chromecast Poller to shut down...")
+	log("Waiting for Chromecast Poller to shut down...")
 	chromecast_poller.wait_for_idle_thread.join()
 
 def initialize():

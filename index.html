@@ -27,11 +27,14 @@
 		<br/>
 		<br/>
 		<button id="exit-btn">Exit</button>
+		<br/>
+		<br/>
+		<textarea id="logs-textarea" rows="20" cols="120" readonly></textarea>
 	</body>
 </html>
 
 <script>
-	const k_state_refresh_seconds= 15.0;
+	const k_state_refresh_seconds= 5.0;
 
 	async function post_command(name, parameters)
 	{
@@ -62,6 +65,13 @@
 		chromecast_name_div.textContent= state_json.chromecast_name;
 
 		pause_button.textContent= state_json.is_paused ? "Resume" : "Pause";
+
+		logs_textarea.textContent= ">" + state_json.log_lines.join("\n>");
+
+		if (logs_textarea.selectionStart == logs_textarea.selectionEnd)
+		{
+			logs_textarea.scrollTop = logs_textarea.scrollHeight;
+		}
 
 		if (state_json.current_image_index != -1)
 		{
@@ -173,6 +183,7 @@
 	const image_list= document.getElementById('image-list');
 	image_list.addEventListener('change', async _ => { response= get_selected_image(); } );
 	const image_preview= document.getElementById('image-preview');
+	const logs_textarea= document.getElementById('logs-textarea');
 
 	refresh_state();
 </script>
