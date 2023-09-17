@@ -1,5 +1,5 @@
-Pillow==9.5.0
+Pillow==10.0.1
 pillow_heif==0.10.0
 PyChromecast==13.0.6
-ruamel.base==1.0.0
-zeroconf==0.62.0
+ruamel.yaml==1.0.0
+zeroconf==0.112.0
