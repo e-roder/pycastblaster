@@ -9,7 +9,7 @@ aspect_ratio_720p= 1280 / 720 # 720p resolution
 # Resize generated images down to this scale, so that they can be loaded faster by chromecast.
 # Adjust to max support resolution of your chromecast.
 max_image_height_pixels= 720
-supported_image_extensions= (".jpg", ".jpeg", ".png")
+supported_image_extensions= (".jpg", ".jpeg", ".png", ".heic")
 
 # How to handle images that aren't 720 aspect ratio
 class ImageProcessing(enum.IntEnum):
